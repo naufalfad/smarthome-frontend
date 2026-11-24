@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  * {
+    border-color: rgba(226, 228, 240, 0.8);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #E7E8F3;
+    color: #181829;
+  }
+}
+
+/* Custom subtle scrollbar for light theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(160, 164, 184, 0.35);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 144, 164, 0.55);
+}
+
+/* Light Theme Card Shadows & Effects */
+.card-soft {
+  background: #FFFFFF;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px -4px rgba(112, 118, 150, 0.07), 0 4px 12px -2px rgba(112, 118, 150, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+}
+
+.card-soft-hover {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-soft-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px -4px rgba(139, 92, 246, 0.12), 0 6px 16px -2px rgba(112, 118, 150, 0.06);
+  border-color: rgba(167, 139, 250, 0.4);
+}
+
+/* Floating Pill Button Styling */
+.pill-button {
+  background: #FFFFFF;
+  border-radius: 9999px;
+  box-shadow: 0 4px 14px -2px rgba(112, 118, 150, 0.08);
+  border: 1px solid rgba(230, 232, 242, 0.8);
+}

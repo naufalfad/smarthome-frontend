@@ -22,6 +22,7 @@ import { Badge } from '../ui/badge';
 import { getDeviceIconComponent } from './DeviceLibraryPanel';
 import { getDeviceVisualTheme } from '../../utils/device-visual';
 import { deviceApi } from '../../services/device.api';
+import { LiveVideoStreamPlayer } from './LiveVideoStreamPlayer';
 
 interface DeviceControlModalProps {
   device: IoTDevice | null;
@@ -71,7 +72,19 @@ export const DeviceControlModal: React.FC<DeviceControlModalProps> = ({
   const iconName = catalogItem?.icon || device.type;
   const IconComponent = getDeviceIconComponent(iconName);
   const itemColor = catalogItem?.color || '#8B5CF6';
-  const isSensor = catalogItem?.category === 'SENSORS';
+  
+  const isVisualDevice =
+    catalogItem?.category === 'VISUAL' ||
+    device.type === 'OUTDOOR_CAMERA' ||
+    device.type === 'INDOOR_CAMERA' ||
+    device.type === 'VIDEO_DOORBELL' ||
+    device.type === 'SMART_DISPLAY_HUB' ||
+    device.type.includes('CAMERA');
+
+  const isSensor =
+    catalogItem?.category === 'MONITORING' ||
+    catalogItem?.category === 'SENSORS' ||
+    (!isVisualDevice && capabilities.length > 0 && capabilities.every((c) => !c.controllable));
 
   const handleUpdateConfigProperty = async (property: string, value: any) => {
     const nextConfig = { ...config, [property]: value };
@@ -142,7 +155,7 @@ export const DeviceControlModal: React.FC<DeviceControlModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className={`bg-white rounded-3xl shadow-2xl border border-slate-200 w-full ${isVisualDevice ? 'max-w-xl' : 'max-w-md'} overflow-hidden animate-in zoom-in-95 duration-200`}>
         {/* Banner VIRTUAL PROVIDER / SIMULATION (Phase 6 requirement) */}
         <div className="bg-purple-600 px-4 py-2 flex items-center justify-between text-white shadow-xs">
           <div className="flex items-center gap-1.5 text-xs font-black tracking-wider uppercase">
@@ -219,7 +232,7 @@ export const DeviceControlModal: React.FC<DeviceControlModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
+        <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
           {/* Command Error Alert */}
           {commandError && (
             <div className="p-3 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-800 flex items-start gap-2 animate-in fade-in">
@@ -231,8 +244,19 @@ export const DeviceControlModal: React.FC<DeviceControlModalProps> = ({
             </div>
           )}
 
-          {/* SENSOR MONITORING VIEW (READ-ONLY) */}
-          {isSensor ? (
+          {/* VISUAL LIVE CAMERA STREAM PLAYER */}
+          {isVisualDevice ? (
+            <div className="space-y-3">
+              <LiveVideoStreamPlayer
+                device={{
+                  ...device,
+                  configuration: config,
+                  status,
+                }}
+                onControlDevice={onControlDevice}
+              />
+            </div>
+          ) : isSensor ? (
             <div className="space-y-3">
               <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex items-center gap-2.5">
                 <Info className="w-4 h-4 text-amber-700 shrink-0" />

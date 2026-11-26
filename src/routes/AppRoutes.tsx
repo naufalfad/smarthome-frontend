@@ -19,6 +19,7 @@ import { CustomerOrdersPage } from '../pages/client/CustomerOrdersPage';
 import { AdminServiceOrdersPage } from '../pages/admin/AdminServiceOrdersPage';
 import { TechnicianWorkspacePage } from '../pages/technician/TechnicianWorkspacePage';
 import { AdminPackagesPage } from '../pages/packages/AdminPackagesPage';
+import { MasterData3DPage } from '../pages/admin/MasterData3DPage';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -111,6 +112,9 @@ export const AppRoutes: React.FC = () => {
 
           {/* Commercial Service Orders Management Console (Phase 7) */}
           <Route path="admin/orders" element={<AdminServiceOrdersPage />} />
+
+          {/* Digital Twin 3D Master Data Assets (Phase 12) */}
+          <Route path="master-data-3d" element={<MasterData3DPage />} />
 
           {/* Frozen Legacy 3D Studio (Preserved) */}
           <Route path="models" element={<ModelLibraryPage />} />

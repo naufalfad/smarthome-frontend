@@ -129,6 +129,14 @@ class FloorPlanApiService {
     );
   }
 
+  public async rotatePlan(id: string): Promise<FloorPlan> {
+    return httpClient.post<FloorPlan>(
+      `/floor-plans/${id}/rotate`,
+      {},
+      'Failed to rotate floor plan'
+    );
+  }
+
   // ==========================================
   // OBJECT CATALOG
   // ==========================================

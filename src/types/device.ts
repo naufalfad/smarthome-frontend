@@ -1,11 +1,31 @@
 export type DeviceType =
-  // Standard Phase 4 Types
+  // Standard Phase 4 & Phase 11 Canonical Types
   | 'SMART_LIGHT'
   | 'SMART_DIMMER'
   | 'SMART_AC'
   | 'SMART_LOCK'
+  | 'SMART_SWITCH'
+  | 'SMART_PLUG'
+  | 'SMART_CURTAIN'
+  | 'SMART_WATER_VALVE'
+  | 'SMART_EXHAUST_FAN'
+  | 'SMART_SIREN'
   | 'TEMP_HUMIDITY_SENSOR'
+  | 'WATER_LEVEL_SENSOR'
+  | 'AUTO_DUSK_DAWN_LIGHT'
+  | 'AUTO_PIR_NIGHT_LIGHT'
+  | 'WATER_LEAK_SENSOR'
+  | 'SMOKE_FIRE_SENSOR'
+  | 'GAS_LEAK_SENSOR'
+  | 'DOOR_WINDOW_SENSOR'
+  | 'PIR_MOTION_SENSOR'
+  | 'PRESENCE_RADAR_SENSOR'
   | 'AIR_QUALITY_SENSOR'
+  | 'ENERGY_MONITOR'
+  | 'OUTDOOR_CAMERA'
+  | 'INDOOR_CAMERA'
+  | 'VIDEO_DOORBELL'
+  | 'SMART_DISPLAY_HUB'
   // Legacy / Short Form Types
   | 'LIGHT'
   | 'SWITCH'
@@ -53,6 +73,12 @@ export interface DeviceCatalogItem {
   capabilities: DeviceCapability[];
   defaultConfiguration: Record<string, any>;
   isActive: boolean;
+  modelGlbPath?: string | null;
+  placementTarget?: 'WALL' | 'CEILING' | 'FLOOR' | 'TABLETOP' | string;
+  defaultElevation?: number;
+  dimensionLength?: number;
+  dimensionWidth?: number;
+  dimensionHeight?: number;
   createdAt?: string;
   updatedAt?: string;
 }

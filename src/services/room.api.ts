@@ -13,6 +13,7 @@ class RoomApiService {
       type?: string;
       color?: string;
       polygonCoordinates?: PolygonPoint[];
+      ceilingHeight?: number;
     }
   ): Promise<Room> {
     return httpClient.post<Room>(`/floors/${floorId}/rooms`, data, 'Failed to create room');

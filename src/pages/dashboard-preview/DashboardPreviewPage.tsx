@@ -7,12 +7,9 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Eye,
-  Sliders,
   ArrowLeft,
-  Home,
-  RefreshCw,
-  Sparkles,
   ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import { floorPlanApi } from '../../services/floor-plan.api';
 import { House } from '../../types/floor-plan';
@@ -97,9 +94,16 @@ export const DashboardPreviewPage: React.FC = () => {
       </div>
 
       {/* Render the full User Dashboard */}
-      <div className="rounded-3xl overflow-hidden border border-slate-200 shadow-md">
-        <ClientDashboardPage key={selectedHouseId} />
-      </div>
+      {loading ? (
+        <div className="min-h-[400px] bg-white rounded-3xl border border-slate-200 flex flex-col items-center justify-center p-8 text-center">
+          <RefreshCw className="w-8 h-8 text-purple-600 animate-spin mb-3" />
+          <p className="text-xs font-bold text-slate-600">Menyiapkan Preview Dashboard...</p>
+        </div>
+      ) : (
+        <div className="rounded-3xl overflow-hidden border border-slate-200 shadow-md">
+          <ClientDashboardPage key={selectedHouseId} initialHouseId={selectedHouseId} />
+        </div>
+      )}
     </div>
   );
 };

@@ -20,6 +20,11 @@ import {
   Sparkles,
   Info,
   AlertTriangle,
+  Zap,
+  Fan,
+  Gauge,
+  Bell,
+  Monitor,
 } from 'lucide-react';
 import { DeviceCatalogItem, DeviceCapability, IoTDevice } from '../../types/device';
 import { deviceApi } from '../../services/device.api';
@@ -61,6 +66,25 @@ export function getDeviceIconComponent(iconName: string): React.ComponentType<{ 
     case 'droplets':
     case 'water':
       return Droplets;
+    case 'radio':
+    case 'radar':
+      return Radio;
+    case 'zap':
+    case 'power':
+    case 'plug':
+    case 'socket':
+      return Zap;
+    case 'fan':
+      return Fan;
+    case 'gauge':
+    case 'energy':
+      return Gauge;
+    case 'bell':
+    case 'siren':
+      return Bell;
+    case 'monitor':
+    case 'display':
+      return Monitor;
     default:
       return Cpu;
   }
@@ -172,6 +196,8 @@ interface DeviceLibraryPanelProps {
     maxDevices: number | null;
     isQuotaReached: boolean;
   } | null;
+  categoryFilter?: string;
+  onClearCategoryFilter?: () => void;
 }
 
 export const DeviceLibraryPanel: React.FC<DeviceLibraryPanelProps> = ({
@@ -182,6 +208,8 @@ export const DeviceLibraryPanel: React.FC<DeviceLibraryPanelProps> = ({
   selectedDeviceId = null,
   onSelectPlacedDevice,
   quota = null,
+  categoryFilter = 'Overview',
+  onClearCategoryFilter,
 }) => {
   const [subTab, setSubTab] = useState<'catalog' | 'placed'>('catalog');
   const [catalogItems, setCatalogItems] = useState<DeviceCatalogItem[]>([]);
@@ -207,6 +235,48 @@ export const DeviceLibraryPanel: React.FC<DeviceLibraryPanelProps> = ({
   useEffect(() => {
     loadCatalog();
   }, [loadCatalog]);
+
+  // Synchronize category filter from header
+  useEffect(() => {
+    if (categoryFilter === 'Engine room') {
+      setActiveCategory('LIGHTING');
+      setSubTab('placed');
+    } else if (categoryFilter === 'Internet device') {
+      setActiveCategory('SENSOR');
+      setSubTab('placed');
+    } else if (categoryFilter === 'Office device') {
+      setActiveCategory('CAMERA');
+      setSubTab('placed');
+    } else if (categoryFilter === 'Overview') {
+      setActiveCategory('ALL');
+    }
+  }, [categoryFilter]);
+
+  const isDeviceMatchingFilter = (type: string, cat?: string): boolean => {
+    if (!cat || cat === 'Overview') return true;
+    if (cat === 'Engine room') {
+      return [
+        'SMART_LIGHT', 'SMART_DIMMER', 'SMART_AC', 'SMART_LOCK', 'SMART_SWITCH',
+        'SMART_PLUG', 'SMART_CURTAIN', 'LIGHT', 'SWITCH', 'LOCK', 'AC', 'FAN'
+      ].includes(type);
+    }
+    if (cat === 'Internet device') {
+      return [
+        'DOOR_SENSOR', 'SMOKE_DETECTOR', 'GAS_DETECTOR', 'MOTION_SENSOR',
+        'AIR_QUALITY_SENSOR', 'TEMPERATURE_SENSOR', 'WATER_LEAK_SENSOR', 'WATER_LEVEL_SENSOR'
+      ].includes(type) || type.includes('SENSOR');
+    }
+    if (cat === 'Office device') {
+      return [
+        'OUTDOOR_CAMERA', 'INDOOR_CAMERA', 'VIDEO_DOORBELL', 'SMART_DISPLAY_HUB'
+      ].includes(type) || type.includes('CAMERA');
+    }
+    return true;
+  };
+
+  const displayedPlacedDevices = placedDevices.filter((d) =>
+    isDeviceMatchingFilter(d.type, categoryFilter)
+  );
 
   return (
     <div className="flex flex-col h-full bg-white border-r border-slate-200">
@@ -348,10 +418,9 @@ export const DeviceLibraryPanel: React.FC<DeviceLibraryPanelProps> = ({
             <div className="flex gap-1 overflow-x-auto pb-1 text-[11px] scrollbar-none">
               {[
                 { id: 'ALL', label: 'Semua' },
-                { id: 'LIGHTING', label: 'Pencahayaan' },
-                { id: 'CLIMATE', label: 'Iklim / AC' },
-                { id: 'SECURITY', label: 'Keamanan' },
-                { id: 'SENSORS', label: 'Sensor' },
+                { id: 'MONITORING', label: 'Monitoring (Sensor)' },
+                { id: 'CONTROL', label: 'Kontrol Jarak Jauh' },
+                { id: 'VISUAL', label: 'Visual (Kamera)' },
               ].map((cat) => (
                 <button
                   key={cat.id}
@@ -490,26 +559,52 @@ export const DeviceLibraryPanel: React.FC<DeviceLibraryPanelProps> = ({
 
       ) : (
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {categoryFilter && categoryFilter !== 'Overview' && (
+            <div className="flex items-center justify-between p-2 rounded-xl bg-blue-50 border border-blue-200/80 text-xs text-blue-900 font-bold mb-1 shadow-2xs">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-[#4F6BFF] animate-pulse" />
+                <span>Filter Kategori: {categoryFilter}</span>
+              </div>
+              {onClearCategoryFilter && (
+                <button
+                  type="button"
+                  onClick={onClearCategoryFilter}
+                  className="text-[11px] text-blue-600 hover:text-blue-800 underline font-semibold cursor-pointer"
+                >
+                  Tampilkan Semua
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center justify-between px-1 text-[11px] text-slate-500 font-medium">
-            <span>{placedDevices.length} Perangkat pada Denah</span>
+            <span>
+              {categoryFilter !== 'Overview'
+                ? `${displayedPlacedDevices.length} dari ${placedDevices.length} Perangkat`
+                : `${placedDevices.length} Perangkat pada Denah`}
+            </span>
             <span className="flex items-center gap-1 text-emerald-600 font-semibold text-[10.5px]">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               Live Sync
             </span>
           </div>
 
-
-
-          {placedDevices.length === 0 ? (
+          {displayedPlacedDevices.length === 0 ? (
             <div className="text-center py-12 text-slate-400 text-xs space-y-1">
               <Cpu className="w-8 h-8 mx-auto text-slate-300 stroke-1" />
-              <p className="font-semibold text-slate-600">Belum ada perangkat terpasang</p>
-              <p className="text-[11px] text-slate-400">Pilih tab "Katalog" lalu klik denah untuk memasang perangkat.</p>
+              <p className="font-semibold text-slate-600">
+                {categoryFilter !== 'Overview'
+                  ? `Tidak ada perangkat dalam kategori ${categoryFilter}`
+                  : 'Belum ada perangkat terpasang'}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {categoryFilter !== 'Overview'
+                  ? 'Klik "Tampilkan Semua" atau pasang perangkat baru dari Katalog.'
+                  : 'Pilih tab "Katalog" lalu klik denah untuk memasang perangkat.'}
+              </p>
             </div>
-
-
           ) : (
-            placedDevices.map((dev) => {
+            displayedPlacedDevices.map((dev) => {
               const isSelected = selectedDeviceId === dev.id;
               const theme = getDeviceVisualTheme(dev);
               const IconComp = getDeviceIconComponent(dev.catalogItem?.icon || dev.type);

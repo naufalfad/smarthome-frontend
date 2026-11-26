@@ -11,6 +11,7 @@ import {
   Maximize2,
   Box,
   Compass,
+  Sparkles,
 } from 'lucide-react';
 import { Room, RoomType } from '../../types/floor-plan';
 import { Badge } from '../ui/badge';
@@ -25,6 +26,7 @@ interface RoomExplorerPanelProps {
   hiddenRoomIds: Set<string>;
   onToggleRoomVisibility: (roomId: string) => void;
   onEditRoomPolygon: (roomId: string) => void;
+  onOpenAutoRoomReference?: () => void;
 }
 
 export const ROOM_TYPE_LABELS: Record<RoomType, string> = {
@@ -47,6 +49,7 @@ export const RoomExplorerPanel: React.FC<RoomExplorerPanelProps> = ({
   hiddenRoomIds,
   onToggleRoomVisibility,
   onEditRoomPolygon,
+  onOpenAutoRoomReference,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedType, setSelectedType] = useState<string>('ALL');
@@ -83,6 +86,20 @@ export const RoomExplorerPanel: React.FC<RoomExplorerPanelProps> = ({
               </button>
             )}
           </div>
+
+          {onOpenAutoRoomReference && (
+            <Button
+              variant="outline"
+              size="sm"
+              pill
+              onClick={onOpenAutoRoomReference}
+              className="text-xs gap-1 text-purple-700 border-purple-200 bg-purple-50/60 hover:bg-purple-100 shrink-0"
+              title="Deteksi / Hasilkan referensi partisi ruangan otomatis"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+              <span className="hidden sm:inline">Auto Referensi</span>
+            </Button>
+          )}
 
           <Button
             variant="purple"
@@ -143,16 +160,30 @@ export const RoomExplorerPanel: React.FC<RoomExplorerPanelProps> = ({
                 : 'Coba ubah kata kunci pencarian atau filter tipe.'}
             </p>
             {rooms.length === 0 && (
-              <Button
-                variant="secondary"
-                size="sm"
-                pill
-                onClick={onStartDrawRoom}
-                className="text-xs gap-1 text-purple-700 border-purple-200 hover:bg-purple-50"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Gambar Ruangan Pertama</span>
-              </Button>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
+                {onOpenAutoRoomReference && (
+                  <Button
+                    variant="purple"
+                    size="sm"
+                    pill
+                    onClick={onOpenAutoRoomReference}
+                    className="text-xs gap-1 shadow-xs"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Auto Referensi Ruangan</span>
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  pill
+                  onClick={onStartDrawRoom}
+                  className="text-xs gap-1 text-purple-700 border-purple-200 hover:bg-purple-50"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Gambar Manual</span>
+                </Button>
+              </div>
             )}
           </div>
         ) : (

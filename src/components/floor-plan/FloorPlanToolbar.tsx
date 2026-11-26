@@ -10,6 +10,7 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  RotateCw,
   CheckCircle2,
   Loader2,
   AlertCircle,
@@ -27,6 +28,7 @@ import {
   ExternalLink,
   Ruler,
   Box,
+  Tag,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -67,12 +69,16 @@ interface FloorPlanToolbarProps {
   saveStatus: SaveStatus;
   lastErrorMessage?: string | null;
   onResetCalibration?: () => void;
+  onRotatePlan?: () => void;
   // Product adjustment: Preview Monitoring & Publish
   isPreviewMonitoring?: boolean;
   onTogglePreviewMonitoring?: () => void;
   publishStatus?: string;
   onOpenPublishModal?: () => void;
   onOpenAutomationModal?: () => void;
+  onOpenAutoRoomReference?: () => void;
+  labelDisplayMode?: 'all' | 'hover' | 'compact';
+  onToggleLabelDisplayMode?: () => void;
 }
 
 export const FloorPlanToolbar: React.FC<FloorPlanToolbarProps> = ({
@@ -107,11 +113,15 @@ export const FloorPlanToolbar: React.FC<FloorPlanToolbarProps> = ({
   saveStatus,
   lastErrorMessage,
   onResetCalibration,
+  onRotatePlan,
   isPreviewMonitoring = false,
   onTogglePreviewMonitoring,
   publishStatus = 'DRAFT',
   onOpenPublishModal,
   onOpenAutomationModal,
+  onOpenAutoRoomReference,
+  labelDisplayMode = 'all',
+  onToggleLabelDisplayMode,
 }) => {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2.5 p-2.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
@@ -214,6 +224,18 @@ export const FloorPlanToolbar: React.FC<FloorPlanToolbarProps> = ({
               <span>Gambar Ruang</span>
             </button>
 
+            {onOpenAutoRoomReference && (
+              <button
+                type="button"
+                onClick={onOpenAutoRoomReference}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all text-purple-700 bg-purple-50 hover:bg-purple-100 hover:text-purple-900 border border-purple-200/80 shadow-2xs"
+                title="Hasilkan referensi partisi ruangan otomatis di atas kanvas denah"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                <span>Referensi Ruangan Otomatis</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => onChangeToolMode('calibrate')}
@@ -310,6 +332,21 @@ export const FloorPlanToolbar: React.FC<FloorPlanToolbarProps> = ({
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               )}
+
+              {/* Rotate 90° Clockwise */}
+              {onRotatePlan && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  pill
+                  onClick={onRotatePlan}
+                  className="text-xs gap-1.5"
+                  title="Putar orientasi denah 90° searah jarum jam"
+                >
+                  <RotateCw className="w-3.5 h-3.5 text-purple-600" />
+                  <span className="hidden xl:inline">Putar 90°</span>
+                </Button>
+              )}
             </div>
 
             <div className="h-4 w-px bg-slate-200 mx-1" />
@@ -358,6 +395,37 @@ export const FloorPlanToolbar: React.FC<FloorPlanToolbarProps> = ({
               </button>
             )}
 
+            {/* Device Label Display Mode Toggle */}
+            {onToggleLabelDisplayMode && (
+              <button
+                type="button"
+                onClick={onToggleLabelDisplayMode}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all text-xs font-bold ${
+                  labelDisplayMode === 'all'
+                    ? 'bg-purple-100 border-purple-300 text-purple-700'
+                    : labelDisplayMode === 'hover'
+                    ? 'bg-emerald-100 border-emerald-300 text-emerald-800'
+                    : 'border-slate-200 text-slate-500 hover:bg-slate-100'
+                }`}
+                title={
+                  labelDisplayMode === 'all'
+                    ? 'Mode Label: Semua Label Tampil (Klik untuk beralih ke Mode Bersih / Hover)'
+                    : labelDisplayMode === 'hover'
+                    ? 'Mode Bersih: Label hanya muncul saat kursor diarahkan ke perangkat (Klik untuk Mode Ringkas)'
+                    : 'Mode Ringkas: Ikon perangkat saja (Klik untuk tampilkan Semua Label)'
+                }
+              >
+                <Tag className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">
+                  {labelDisplayMode === 'all'
+                    ? 'Label: Semua'
+                    : labelDisplayMode === 'hover'
+                    ? 'Label: Hover'
+                    : 'Label: Ringkas'}
+                </span>
+              </button>
+            )}
+
             <div className="h-4 w-px bg-slate-200 mx-1" />
 
             {/* Undo / Redo */}
@@ -385,13 +453,14 @@ export const FloorPlanToolbar: React.FC<FloorPlanToolbarProps> = ({
           </>
         )}
 
-        {/* Zoom Controls */}
+        {/* Zoom Controls (Fit to Frame = 100% Minimum) */}
         <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-1.5 py-1">
           <button
             type="button"
             onClick={onZoomOut}
-            className="p-1 rounded-lg hover:bg-slate-200 text-slate-600"
-            title="Zoom Out"
+            disabled={zoomLevel <= 100}
+            className="p-1 rounded-lg hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:pointer-events-none transition-opacity"
+            title={zoomLevel <= 100 ? 'Sudah ukuran pas frame (Fit to Frame)' : 'Zoom Out'}
           >
             <ZoomOut className="w-3.5 h-3.5" />
           </button>
@@ -401,7 +470,8 @@ export const FloorPlanToolbar: React.FC<FloorPlanToolbarProps> = ({
           <button
             type="button"
             onClick={onZoomIn}
-            className="p-1 rounded-lg hover:bg-slate-200 text-slate-600"
+            disabled={zoomLevel >= 400}
+            className="p-1 rounded-lg hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:pointer-events-none transition-opacity"
             title="Zoom In"
           >
             <ZoomIn className="w-3.5 h-3.5" />
@@ -410,7 +480,7 @@ export const FloorPlanToolbar: React.FC<FloorPlanToolbarProps> = ({
             type="button"
             onClick={onResetZoom}
             className="p-1 rounded-lg hover:bg-slate-200 text-slate-500 ml-0.5 border-l border-slate-200 pl-1.5"
-            title="Reset View"
+            title="Reset ke Ukuran Pas Frame (Fit to Frame 100%)"
           >
             <RotateCcw className="w-3 h-3" />
           </button>

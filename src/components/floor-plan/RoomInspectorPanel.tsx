@@ -10,6 +10,8 @@ import {
   AlertTriangle,
   Info,
   CheckCircle2,
+  X,
+  Ruler,
 } from 'lucide-react';
 import { Room, RoomType, FloorPlanObject } from '../../types/floor-plan';
 import { ROOM_TYPE_LABELS } from './RoomExplorerPanel';
@@ -24,6 +26,7 @@ interface RoomInspectorPanelProps {
   onEditPolygon: (roomId: string) => void;
   onSelectObject: (objectId: string) => void;
   isCalibrated: boolean;
+  onClose?: () => void;
 }
 
 const COLOR_SWATCHES = [
@@ -48,6 +51,7 @@ export const RoomInspectorPanel: React.FC<RoomInspectorPanelProps> = ({
   onEditPolygon,
   onSelectObject,
   isCalibrated,
+  onClose,
 }) => {
   const vertexCount =
     room.polygonCoordinates && Array.isArray(room.polygonCoordinates)
@@ -66,9 +70,21 @@ export const RoomInspectorPanel: React.FC<RoomInspectorPanelProps> = ({
           />
           <h3 className="text-xs font-bold text-[#181829]">Room Inspector</h3>
         </div>
-        <Badge variant="purple" className="text-[10px]">
-          {ROOM_TYPE_LABELS[room.type] || room.type}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="purple" className="text-[10px]">
+            {ROOM_TYPE_LABELS[room.type] || room.type}
+          </Badge>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1 rounded-lg hover:bg-purple-200/60 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+              title="Tutup Panel Ruangan"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 p-3.5 space-y-4">
@@ -141,6 +157,70 @@ export const RoomInspectorPanel: React.FC<RoomInspectorPanelProps> = ({
               placeholder="#6366F1"
               className="flex-1 px-2.5 py-1.5 rounded-xl border border-slate-200 font-mono text-xs text-[#181829] uppercase focus:outline-none focus:border-purple-500"
             />
+          </div>
+        </div>
+
+        {/* 3D Ceiling Height Control */}
+        <div className="p-3.5 rounded-2xl bg-purple-50/50 border border-purple-100 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-bold text-[#181829] flex items-center gap-1.5">
+              <Ruler className="w-3.5 h-3.5 text-purple-600" />
+              <span>Tinggi Plafon (3D Wall Height)</span>
+            </label>
+            <span className="text-xs font-mono font-bold text-purple-700 bg-white px-2 py-0.5 rounded-md border border-purple-200">
+              {(room.ceilingHeight ?? 3.0).toFixed(1)} m
+            </span>
+          </div>
+
+          <p className="text-[11px] text-[#71758E] leading-tight">
+            Tinggi dinding acuan saat diekstrusi ke model 3D Dollhouse.
+          </p>
+
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min="2.0"
+              max="5.0"
+              step="0.1"
+              value={room.ceilingHeight ?? 3.0}
+              onChange={(e) => onUpdateRoom(room.id, { ceilingHeight: parseFloat(e.target.value) })}
+              className="flex-1 accent-purple-600 cursor-pointer"
+            />
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => onUpdateRoom(room.id, { ceilingHeight: 2.8 })}
+                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                  (room.ceilingHeight ?? 3.0) === 2.8
+                    ? 'bg-purple-600 text-white border-purple-600'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-purple-300'
+                }`}
+              >
+                2.8m
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateRoom(room.id, { ceilingHeight: 3.0 })}
+                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                  (room.ceilingHeight ?? 3.0) === 3.0
+                    ? 'bg-purple-600 text-white border-purple-600'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-purple-300'
+                }`}
+              >
+                3.0m
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateRoom(room.id, { ceilingHeight: 3.5 })}
+                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                  (room.ceilingHeight ?? 3.0) === 3.5
+                    ? 'bg-purple-600 text-white border-purple-600'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-purple-300'
+                }`}
+              >
+                3.5m
+              </button>
+            </div>
           </div>
         </div>
 

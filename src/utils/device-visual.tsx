@@ -137,12 +137,33 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
   }
 
   // 3. DOOR & WINDOW SENSORS
-  if (type === 'DOOR_SENSOR' || type === 'WINDOW_SENSOR') {
+  if (type === 'DOOR_SENSOR' || type === 'WINDOW_SENSOR' || type === 'DOOR_WINDOW_SENSOR') {
     const isOpen = isDeviceDoorOpen(dev);
-    const labelPrefix = type === 'WINDOW_SENSOR' ? '🪟' : '🚪';
+    const labelPrefix = (type === 'WINDOW_SENSOR' || type.includes('WINDOW')) ? '🪟' : '🚪';
+    const isOnline = dev.status !== 'OFFLINE';
+
+    if (!isOnline) {
+      return {
+        status: 'OFFLINE',
+        isActive: false,
+        pinOpacity: 0.4,
+        primaryColor: '#64748B',
+        fillColor: 'transparent',
+        strokeColor: '#94A3B8',
+        pinBgColor: '#0F172A',
+        pinBorderColor: '#334155',
+        ringColor: '#334155',
+        glowColor: 'none',
+        hasAmbientHalo: false,
+        haloColor: '#64748B',
+        haloRadiusFactor: 1,
+        haloOpacity: 0,
+        statusText: '⚪ OFFLINE',
+      };
+    }
 
     if (isOpen) {
-      // TERBUKA — Warning Orange
+      // TERBUKA — Warning Orange Alert
       return {
         status: 'OPEN',
         isActive: true,
@@ -162,18 +183,18 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
       };
     }
 
-    // TERTUTUP — Calm Emerald Green (Safe, resting state)
+    // TERTUTUP — Solid Vibrant Emerald Green (Active, Online & Secure)
     return {
       status: 'CLOSED',
-      isActive: false,
-      pinOpacity: 0.55,
+      isActive: true,
+      pinOpacity: 1.0,
       primaryColor: '#10B981',
-      fillColor: 'rgba(16, 185, 129, 0.2)',
-      strokeColor: '#34D399',
+      fillColor: 'rgba(16, 185, 129, 0.35)',
+      strokeColor: '#10B981',
       pinBgColor: '#064E3B',
-      pinBorderColor: '#34D399',
+      pinBorderColor: '#6EE7B7',
       ringColor: '#10B981',
-      glowColor: 'none',
+      glowColor: 'rgba(16, 185, 129, 0.4)',
       hasAmbientHalo: false,
       haloColor: '#10B981',
       haloRadiusFactor: 1,
@@ -183,7 +204,7 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
   }
 
   // 4. LIGHTING & DIMMERS (Menyala: Warm Yellow/Amber Radiant vs Redup: Dark Muted Slate)
-  if (type === 'LIGHT' || type === 'SMART_LIGHT' || type === 'SMART_DIMMER') {
+  if (type === 'LIGHT' || type === 'SMART_LIGHT' || type === 'SMART_DIMMER' || type === 'AUTO_DUSK_DAWN_LIGHT' || type === 'AUTO_PIR_NIGHT_LIGHT') {
     const isPower = isDevicePowerOn(dev);
     const brightness = typeof cfg.brightness === 'number' ? cfg.brightness : 100;
 
@@ -272,10 +293,54 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
     };
   }
 
-  // 6. SWITCH & SOCKET (Menyala: Electric Blue vs Redup: Slate Off)
-  if (type === 'SWITCH' || type === 'SOCKET') {
+  // 6. ENERGY MONITOR (Meteran MCB Listrik Utama - Selalu Aktif Memantau)
+  if (type === 'ENERGY_MONITOR') {
+    const isOnline = dev.status !== 'OFFLINE';
+    const powerW = cfg.powerWatts ?? cfg.power ?? 1420;
+
+    if (isOnline) {
+      return {
+        status: 'ONLINE',
+        isActive: true,
+        pinOpacity: 1.0,
+        primaryColor: '#3B82F6', // Electric Blue
+        fillColor: 'rgba(59, 130, 246, 0.38)',
+        strokeColor: '#3B82F6',
+        pinBgColor: '#1E3A8A',
+        pinBorderColor: '#93C5FD',
+        ringColor: '#3B82F6',
+        glowColor: 'rgba(59, 130, 246, 0.5)',
+        hasAmbientHalo: true,
+        haloColor: '#3B82F6',
+        haloRadiusFactor: 2.0,
+        haloOpacity: 0.22,
+        statusText: `⚡ ${powerW}W`,
+      };
+    }
+
+    return {
+      status: 'OFFLINE',
+      isActive: false,
+      pinOpacity: 0.4,
+      primaryColor: '#64748B',
+      fillColor: 'transparent',
+      strokeColor: '#94A3B8',
+      pinBgColor: '#0F172A',
+      pinBorderColor: '#334155',
+      ringColor: '#334155',
+      glowColor: 'none',
+      hasAmbientHalo: false,
+      haloColor: '#64748B',
+      haloRadiusFactor: 1,
+      haloOpacity: 0,
+      statusText: '⚪ OFFLINE',
+    };
+  }
+
+  // 7. SWITCH & SOCKET (Menyala: Electric Blue vs Redup: Slate Off)
+  if (type === 'SWITCH' || type === 'SOCKET' || type === 'SMART_SWITCH' || type === 'SMART_PLUG' || type === 'SMART_WATER_VALVE' || type === 'SMART_SIREN') {
     const isPower = isDevicePowerOn(dev);
-    const isSocket = type === 'SOCKET';
+    const isSocket = type === 'SOCKET' || type === 'SMART_PLUG';
 
     if (isPower) {
       return {
@@ -300,7 +365,7 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
     return {
       status: 'OFF',
       isActive: false,
-      pinOpacity: 0.45,
+      pinOpacity: 0.55,
       primaryColor: '#64748B',
       fillColor: 'transparent',
       strokeColor: '#94A3B8',
@@ -317,7 +382,7 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
   }
 
   // 7. FAN (Menyala: Sky Blue vs Redup: Mati)
-  if (type === 'FAN') {
+  if (type === 'FAN' || type === 'SMART_EXHAUST_FAN') {
     const isPower = isDevicePowerOn(dev);
 
     if (isPower) {
@@ -360,7 +425,7 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
   }
 
   // 8. CAMERA (Online/Live: Violet vs Offline: Gray)
-  if (type === 'CAMERA') {
+  if (type === 'CAMERA' || type === 'OUTDOOR_CAMERA' || type === 'INDOOR_CAMERA' || type === 'VIDEO_DOORBELL' || type === 'SMART_DISPLAY_HUB') {
     const isOnline = dev.status === 'ONLINE' || dev.status === 'ON' || dev.status !== 'OFFLINE';
 
     if (isOnline) {
@@ -403,9 +468,30 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
   }
 
   // 9. SAFETY SENSORS (SMOKE_DETECTOR & WATER_LEAK)
-  if (type === 'SMOKE_DETECTOR' || type === 'WATER_LEAK') {
-    const isLeak = type === 'WATER_LEAK';
+  if (type === 'SMOKE_DETECTOR' || type === 'WATER_LEAK' || type === 'SMOKE_FIRE_SENSOR' || type === 'GAS_LEAK_SENSOR' || type === 'WATER_LEAK_SENSOR' || type === 'WATER_LEVEL_SENSOR') {
+    const isLeak = type === 'WATER_LEAK' || type === 'WATER_LEAK_SENSOR' || type === 'WATER_LEVEL_SENSOR';
     const alertTriggered = isAlert || dev.status === 'ALERT';
+    const isOnline = dev.status !== 'OFFLINE';
+
+    if (!isOnline) {
+      return {
+        status: 'OFFLINE',
+        isActive: false,
+        pinOpacity: 0.4,
+        primaryColor: '#64748B',
+        fillColor: 'transparent',
+        strokeColor: '#94A3B8',
+        pinBgColor: '#0F172A',
+        pinBorderColor: '#334155',
+        ringColor: '#334155',
+        glowColor: 'none',
+        hasAmbientHalo: false,
+        haloColor: '#64748B',
+        haloRadiusFactor: 1,
+        haloOpacity: 0,
+        statusText: '⚪ OFFLINE',
+      };
+    }
 
     if (alertTriggered) {
       return {
@@ -427,17 +513,18 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
       };
     }
 
+    // Normal Calm Active Monitoring State — Solid Emerald Green
     return {
       status: 'ONLINE',
-      isActive: false, // Normal calm state
-      pinOpacity: 0.55,
+      isActive: true,
+      pinOpacity: 1.0,
       primaryColor: '#10B981',
-      fillColor: 'rgba(16, 185, 129, 0.25)',
+      fillColor: 'rgba(16, 185, 129, 0.35)',
       strokeColor: '#10B981',
       pinBgColor: '#064E3B',
       pinBorderColor: '#6EE7B7',
       ringColor: '#10B981',
-      glowColor: 'none',
+      glowColor: 'rgba(16, 185, 129, 0.4)',
       hasAmbientHalo: false,
       haloColor: '#10B981',
       haloRadiusFactor: 1,
@@ -446,9 +533,30 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
     };
   }
 
-  // 10. MOTION SENSOR
-  if (type === 'MOTION_SENSOR') {
-    const motionDetected = dev.status === 'ALERT' || dev.configuration?.motion === true;
+  // 10. MOTION SENSOR (PIR & mmWave Radar)
+  if (type === 'MOTION_SENSOR' || type === 'PIR_MOTION_SENSOR' || type === 'PRESENCE_RADAR_SENSOR') {
+    const motionDetected = dev.status === 'ALERT' || dev.configuration?.motion === true || dev.configuration?.presence === true;
+    const isOnline = dev.status !== 'OFFLINE';
+
+    if (!isOnline) {
+      return {
+        status: 'OFFLINE',
+        isActive: false,
+        pinOpacity: 0.4,
+        primaryColor: '#64748B',
+        fillColor: 'transparent',
+        strokeColor: '#94A3B8',
+        pinBgColor: '#0F172A',
+        pinBorderColor: '#334155',
+        ringColor: '#334155',
+        glowColor: 'none',
+        hasAmbientHalo: false,
+        haloColor: '#64748B',
+        haloRadiusFactor: 1,
+        haloOpacity: 0,
+        statusText: '⚪ OFFLINE',
+      };
+    }
 
     if (motionDetected) {
       return {
@@ -470,22 +578,23 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
       };
     }
 
+    // Normal Standby Monitoring State — Solid Cyan/Radar Theme
     return {
       status: 'ONLINE',
-      isActive: false,
-      pinOpacity: 0.55,
-      primaryColor: '#64748B',
-      fillColor: 'transparent',
-      strokeColor: '#94A3B8',
-      pinBgColor: '#0F172A',
-      pinBorderColor: '#334155',
-      ringColor: '#334155',
-      glowColor: 'none',
+      isActive: true,
+      pinOpacity: 1.0,
+      primaryColor: '#06B6D4',
+      fillColor: 'rgba(6, 182, 212, 0.35)',
+      strokeColor: '#06B6D4',
+      pinBgColor: '#083344',
+      pinBorderColor: '#67E8F9',
+      ringColor: '#06B6D4',
+      glowColor: 'rgba(6, 182, 212, 0.4)',
       hasAmbientHalo: false,
-      haloColor: '#64748B',
+      haloColor: '#06B6D4',
       haloRadiusFactor: 1,
       haloOpacity: 0,
-      statusText: '🛡️ STANDBY',
+      statusText: '📡 SIAGA',
     };
   }
 
@@ -577,7 +686,7 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
   }
 
   // 12. CURTAIN
-  if (type === 'CURTAIN') {
+  if (type === 'CURTAIN' || type === 'SMART_CURTAIN') {
     const isOpen = cfg.position !== undefined ? cfg.position > 0 : dev.status === 'OPEN' || dev.status === 'ON';
     if (isOpen) {
       return {
@@ -600,17 +709,17 @@ export function getDeviceVisualTheme(dev: IoTDevice): DeviceVisualTheme {
     }
     return {
       status: 'CLOSED',
-      isActive: false,
-      pinOpacity: 0.55,
-      primaryColor: '#64748B',
-      fillColor: 'transparent',
-      strokeColor: '#94A3B8',
-      pinBgColor: '#0F172A',
-      pinBorderColor: '#334155',
-      ringColor: '#334155',
-      glowColor: 'none',
+      isActive: true,
+      pinOpacity: 1.0,
+      primaryColor: '#60A5FA', // Light Indigo/Blue
+      fillColor: 'rgba(96, 165, 250, 0.25)',
+      strokeColor: '#60A5FA',
+      pinBgColor: '#1E293B',
+      pinBorderColor: '#93C5FD',
+      ringColor: '#60A5FA',
+      glowColor: 'rgba(96, 165, 250, 0.35)',
       hasAmbientHalo: false,
-      haloColor: '#64748B',
+      haloColor: '#60A5FA',
       haloRadiusFactor: 1,
       haloOpacity: 0,
       statusText: '🪟 TERTUTUP',
@@ -733,6 +842,8 @@ export const DeviceSvgIcon: React.FC<{ type: string; theme: DeviceVisualTheme }>
     // 1. LIGHTING (Bulb with Radiant Yellow Fill & Beams vs Dim Outline)
     case 'LIGHT':
     case 'SMART_LIGHT':
+    case 'AUTO_DUSK_DAWN_LIGHT':
+    case 'AUTO_PIR_NIGHT_LIGHT':
       return theme.isActive ? (
         <>
           <path
@@ -793,6 +904,7 @@ export const DeviceSvgIcon: React.FC<{ type: string; theme: DeviceVisualTheme }>
 
     // 4. DOOR SENSOR (Open Swung Door vs Closed Door)
     case 'DOOR_SENSOR':
+    case 'DOOR_WINDOW_SENSOR':
       return theme.status === 'OPEN' || theme.status === 'UNLOCKED' ? (
         <>
           {/* Doorway frame + Swung open door leaf */}
@@ -892,6 +1004,7 @@ export const DeviceSvgIcon: React.FC<{ type: string; theme: DeviceVisualTheme }>
 
     // 9. FAN (Spinning Tri-Blade vs Inactive)
     case 'FAN':
+    case 'SMART_EXHAUST_FAN':
       return theme.isActive ? (
         <>
           <path
@@ -914,6 +1027,10 @@ export const DeviceSvgIcon: React.FC<{ type: string; theme: DeviceVisualTheme }>
 
     // 10. CAMERA (Live Camera + Red Recording Dot vs Gray Camera)
     case 'CAMERA':
+    case 'OUTDOOR_CAMERA':
+    case 'INDOOR_CAMERA':
+    case 'VIDEO_DOORBELL':
+    case 'SMART_DISPLAY_HUB':
       return theme.isActive ? (
         <>
           <path d="M23 7l-7 5 7 5V7z" fill={theme.fillColor} stroke={theme.strokeColor} strokeWidth="1.8" />
@@ -931,6 +1048,7 @@ export const DeviceSvgIcon: React.FC<{ type: string; theme: DeviceVisualTheme }>
 
     // 11. SWITCH
     case 'SWITCH':
+    case 'SMART_SWITCH':
       return (
         <>
           <rect
@@ -954,6 +1072,9 @@ export const DeviceSvgIcon: React.FC<{ type: string; theme: DeviceVisualTheme }>
 
     // 12. SOCKET
     case 'SOCKET':
+    case 'SMART_PLUG':
+    case 'ENERGY_MONITOR':
+    case 'SMART_SIREN':
       return (
         <>
           <circle
@@ -974,6 +1095,8 @@ export const DeviceSvgIcon: React.FC<{ type: string; theme: DeviceVisualTheme }>
 
     // 13. MOTION SENSOR
     case 'MOTION_SENSOR':
+    case 'PIR_MOTION_SENSOR':
+    case 'PRESENCE_RADAR_SENSOR':
       return theme.isActive ? (
         <>
           <path
@@ -998,6 +1121,8 @@ export const DeviceSvgIcon: React.FC<{ type: string; theme: DeviceVisualTheme }>
 
     // 14. SMOKE DETECTOR
     case 'SMOKE_DETECTOR':
+    case 'SMOKE_FIRE_SENSOR':
+    case 'GAS_LEAK_SENSOR':
       return theme.status === 'ALERT' ? (
         <>
           <path
@@ -1019,6 +1144,9 @@ export const DeviceSvgIcon: React.FC<{ type: string; theme: DeviceVisualTheme }>
 
     // 15. WATER LEAK
     case 'WATER_LEAK':
+    case 'WATER_LEAK_SENSOR':
+    case 'WATER_LEVEL_SENSOR':
+    case 'SMART_WATER_VALVE':
       return theme.status === 'ALERT' ? (
         <>
           <path
@@ -1040,6 +1168,7 @@ export const DeviceSvgIcon: React.FC<{ type: string; theme: DeviceVisualTheme }>
 
     // 16. CURTAIN
     case 'CURTAIN':
+    case 'SMART_CURTAIN':
       return theme.status === 'OPEN' ? (
         <>
           <rect x="4" y="3" width="16" height="18" rx="1.5" fill="none" stroke={theme.strokeColor} strokeWidth="1.6" />
@@ -1064,4 +1193,21 @@ export const DeviceSvgIcon: React.FC<{ type: string; theme: DeviceVisualTheme }>
       );
   }
 };
+
+/**
+ * Standalone HTML-safe Device Icon Badge component that wraps DeviceSvgIcon in a valid <svg> viewport.
+ */
+export const DeviceIconBadge: React.FC<{
+  type: string;
+  theme?: DeviceVisualTheme;
+  className?: string;
+}> = ({ type, theme, className = 'w-5 h-5' }) => {
+  const resolvedTheme = theme || getDeviceVisualTheme({ type, status: 'ONLINE' } as any);
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none">
+      <DeviceSvgIcon type={type} theme={resolvedTheme} />
+    </svg>
+  );
+};
+
 

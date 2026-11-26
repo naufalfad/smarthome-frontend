@@ -23,6 +23,7 @@ import {
   Server,
   Wifi,
   Clock,
+  Video,
 } from 'lucide-react';
 import { IoTDevice, DeviceCapability } from '../../types/device';
 import { Room } from '../../types/floor-plan';
@@ -31,6 +32,7 @@ import { Button } from '../ui/button';
 import { getDeviceIconComponent } from './DeviceLibraryPanel';
 import { getDeviceVisualTheme } from '../../utils/device-visual';
 import { deviceApi } from '../../services/device.api';
+import { LiveVideoStreamPlayer } from './LiveVideoStreamPlayer';
 
 interface DeviceInspectorPanelProps {
   device: IoTDevice | null;
@@ -104,8 +106,16 @@ export const DeviceInspectorPanel: React.FC<DeviceInspectorPanelProps> = ({
   const iconName = catalogItem?.icon || device.type;
   const IconComponent = getDeviceIconComponent(iconName);
   const itemColor = catalogItem?.color || '#8B5CF6';
-  const isSensor = catalogItem?.category === 'SENSORS';
+  const isSensor = catalogItem?.category === 'SENSORS' || catalogItem?.category === 'MONITORING';
   const theme = getDeviceVisualTheme(device);
+
+  const isVisualDevice =
+    catalogItem?.category === 'VISUAL' ||
+    device.type === 'OUTDOOR_CAMERA' ||
+    device.type === 'INDOOR_CAMERA' ||
+    device.type === 'VIDEO_DOORBELL' ||
+    device.type === 'SMART_DISPLAY_HUB' ||
+    device.type.includes('CAMERA');
 
   const handleSave = async (fieldsToUpdate: Partial<IoTDevice>) => {
     try {
@@ -195,6 +205,37 @@ export const DeviceInspectorPanel: React.FC<DeviceInspectorPanelProps> = ({
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Visual Live Stream Preview (for Cameras & Doorbell) */}
+        {isVisualDevice && (
+          <div className="space-y-2 p-3 rounded-2xl bg-slate-950 border border-slate-800 shadow-md">
+            <div className="flex items-center justify-between text-xs font-bold text-white mb-1">
+              <div className="flex items-center gap-1.5">
+                <Video className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="tracking-wide">Live Stream Feed</span>
+              </div>
+              <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                STREAMING
+              </span>
+            </div>
+            <LiveVideoStreamPlayer
+              device={{
+                ...device,
+                configuration: config,
+                status,
+              }}
+              compact={true}
+              onControlDevice={async (_id, action, payload) => {
+                if (action === 'SET_CONFIG' && payload) {
+                  const key = Object.keys(payload)[0];
+                  const val = Object.values(payload)[0];
+                  await handleUpdateConfigProperty(key, val);
+                }
+              }}
+            />
+          </div>
+        )}
+
         {/* Device Name */}
         <div className="space-y-1.5">
           <label className="text-[11px] font-bold text-slate-700">Nama Perangkat</label>
@@ -261,6 +302,49 @@ export const DeviceInspectorPanel: React.FC<DeviceInspectorPanelProps> = ({
                 {preset.label} ({preset.size})
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Label Position & Orientation on CAD Canvas */}
+        <div className="space-y-2 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+          <div className="flex items-center justify-between text-xs font-bold text-[#181829]">
+            <div className="flex items-center gap-1.5">
+              <Compass className="w-3.5 h-3.5 text-purple-600" />
+              <span>Arah Label di Denah</span>
+            </div>
+            <span className="text-[10px] font-mono font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-md uppercase">
+              {config.labelPosition || 'bottom'}
+            </span>
+          </div>
+
+          <p className="text-[11px] text-[#71758E]">
+            Atur arah badge teks agar tidak bertubrukan dengan perangkat lain di sekitarnya.
+          </p>
+
+          <div className="grid grid-cols-5 gap-1 pt-1">
+            {[
+              { id: 'bottom', label: 'Bawah' },
+              { id: 'top', label: 'Atas' },
+              { id: 'left', label: 'Kiri' },
+              { id: 'right', label: 'Kanan' },
+              { id: 'hidden', label: 'Sembunyi' },
+            ].map((pos) => {
+              const currentPos = config.labelPosition || 'bottom';
+              return (
+                <button
+                  key={pos.id}
+                  type="button"
+                  onClick={() => handleUpdateConfigProperty('labelPosition', pos.id)}
+                  className={`py-1 px-1 rounded-lg text-[10px] font-bold transition-all text-center ${
+                    currentPos === pos.id
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {pos.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 

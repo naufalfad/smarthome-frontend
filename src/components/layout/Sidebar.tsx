@@ -46,6 +46,13 @@ export const primaryNavigationItems: NavItem[] = [
     description: 'Manajemen & konfirmasi pesanan pelanggan',
   },
   {
+    name: 'Master Data 3D',
+    href: '/master-data-3d',
+    icon: Box,
+    badge: '3D Assets',
+    description: 'Master data IoT & addons interior digital twin 3D',
+  },
+  {
     name: '2D Floor Plan',
     href: '/floor-plan',
     icon: Map,

@@ -19,6 +19,40 @@ import {
   Zap,
   ArrowLeft,
   Clock,
+  Plus,
+  Trash2,
+  MousePointer,
+  Ruler,
+  RotateCw,
+  RotateCcw,
+  UploadCloud,
+  Grid,
+  Magnet,
+  Undo2,
+  Redo2,
+  Tag,
+  ExternalLink,
+  Loader2,
+  X,
+  SlidersHorizontal,
+  Maximize2,
+  ZoomIn,
+  ZoomOut,
+  Sun,
+  CloudSun,
+  Bell,
+  Shield,
+  Activity,
+  Video,
+  Sliders,
+  Building2,
+  BarChart3,
+  Moon,
+  ChevronDown,
+  ShoppingBag,
+  Power,
+  Flame,
+  Thermometer,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Badge } from '../../components/ui/badge';
@@ -53,6 +87,8 @@ import { RoomExplorerPanel } from '../../components/floor-plan/RoomExplorerPanel
 import { RoomInspectorPanel } from '../../components/floor-plan/RoomInspectorPanel';
 import { AddFloorModal } from '../../components/floor-plan/AddFloorModal';
 import { UploadBackgroundModal } from '../../components/floor-plan/UploadBackgroundModal';
+import { AutoRoomReferenceModal } from '../../components/floor-plan/AutoRoomReferenceModal';
+import { GeneratedRoomReference } from '../../utils/room-reference-generator';
 import { CalibrationModal } from '../../components/floor-plan/CalibrationModal';
 import { AutomationListPanel } from '../../components/automation/AutomationListPanel';
 
@@ -95,11 +131,52 @@ export const FloorPlanWorkspacePage: React.FC = () => {
   const [spatialDetections, setSpatialDetections] = useState<Record<string, string | null>>({});
 
   // Studio UI States
-  const [leftTab, setLeftTab] = useState<'devices' | 'library' | 'rooms' | 'structure'>('devices');
+  const [leftTab, setLeftTab] = useState<'summary' | 'devices' | 'library' | 'rooms' | 'structure'>('summary');
+  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState<boolean>(true);
+  const [isSidebarHovered, setIsSidebarHovered] = useState<boolean>(false);
+  const [selectedCategoryTab, setSelectedCategoryTab] = useState<string>('Overview');
+  const [canvasTheme, setCanvasTheme] = useState<'light' | 'dark'>('light');
+  const [currentTime, setCurrentTime] = useState<string>('');
+
+  useEffect(() => {
+    const updateClock = () => {
+      const now = new Date();
+      setCurrentTime(
+        now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })
+      );
+    };
+    updateClock();
+    const interval = setInterval(updateClock, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Derived metrics for Reference-style Hero Dashboard Cards
+  const onlineDevicesCount = devices.filter((d) => d.status === 'ONLINE' || d.status === 'ON').length;
+  const offlineOrAlertCount = devices.filter((d) => d.status === 'OFFLINE' || d.status === 'ERROR').length;
+  const normalPercent = devices.length > 0 ? Math.round((onlineDevicesCount / devices.length) * 100) : 100;
+  const alertPercent = devices.length > 0 ? Math.round((offlineOrAlertCount / devices.length) * 100) : 0;
+
+  // 4 Categories breakdown for 2x2 grid
+  const controlDevicesCount = devices.filter((d) =>
+    ['SMART_LIGHT', 'SMART_DIMMER', 'SMART_AC', 'SMART_LOCK', 'SMART_SWITCH', 'SMART_PLUG', 'SMART_CURTAIN', 'LIGHT', 'SWITCH', 'LOCK', 'AC', 'FAN'].includes(d.type)
+  ).length;
+
+  const sensorDevicesCount = devices.filter((d) =>
+    ['DOOR_SENSOR', 'SMOKE_DETECTOR', 'GAS_DETECTOR', 'MOTION_SENSOR', 'AIR_QUALITY_SENSOR', 'TEMPERATURE_SENSOR', 'WATER_LEAK_SENSOR', 'WATER_LEVEL_SENSOR'].includes(d.type) ||
+    d.type.includes('SENSOR')
+  ).length;
+
+  const visualDevicesCount = devices.filter((d) =>
+    ['OUTDOOR_CAMERA', 'INDOOR_CAMERA', 'VIDEO_DOORBELL', 'SMART_DISPLAY_HUB'].includes(d.type) ||
+    d.type.includes('CAMERA')
+  ).length;
+
+  const otherOrObjectsCount = (floorPlan?.objects?.length || 0) + Math.max(0, devices.length - controlDevicesCount - sensorDevicesCount - visualDevicesCount);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [showGrid, setShowGrid] = useState<boolean>(true);
   const [snapToGrid, setSnapToGrid] = useState<boolean>(false);
   const [showRoomPolygons, setShowRoomPolygons] = useState<boolean>(true);
+  const [labelDisplayMode, setLabelDisplayMode] = useState<'all' | 'hover' | 'compact'>('all');
   const [drawingTargetRoomId, setDrawingTargetRoomId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('SAVED');
@@ -108,6 +185,7 @@ export const FloorPlanWorkspacePage: React.FC = () => {
   // Modals & Calibration Tool State (Phase 10)
   const [isAddFloorOpen, setIsAddFloorOpen] = useState<boolean>(false);
   const [isUploadBgOpen, setIsUploadBgOpen] = useState<boolean>(false);
+  const [isAutoRoomRefOpen, setIsAutoRoomRefOpen] = useState<boolean>(false);
   const [isCalibrationOpen, setIsCalibrationOpen] = useState<boolean>(false);
   const [calibrationPoint1, setCalibrationPoint1] = useState<{ x: number; y: number } | null>(null);
   const [calibrationPoint2, setCalibrationPoint2] = useState<{ x: number; y: number } | null>(null);
@@ -414,6 +492,9 @@ export const FloorPlanWorkspacePage: React.FC = () => {
         refreshPublishStatus(activeHouse.id);
         refreshQuota(activeHouse.id);
       }
+      if (rooms.length === 0) {
+        setTimeout(() => setIsAutoRoomRefOpen(true), 400);
+      }
     } catch (err) {
       setSaveStatus('ERROR');
       throw err;
@@ -431,6 +512,9 @@ export const FloorPlanWorkspacePage: React.FC = () => {
       if (activeHouse) {
         refreshPublishStatus(activeHouse.id);
         refreshQuota(activeHouse.id);
+      }
+      if (rooms.length === 0) {
+        setTimeout(() => setIsAutoRoomRefOpen(true), 400);
       }
     } catch (err) {
       setSaveStatus('ERROR');
@@ -938,6 +1022,27 @@ export const FloorPlanWorkspacePage: React.FC = () => {
     }
   };
 
+  const handleRotatePlan = async () => {
+    if (!floorPlan) return;
+    setSaveStatus('SAVING');
+    try {
+      const updated = await floorPlanApi.rotatePlan(floorPlan.id);
+      setFloorPlan((prev) => (prev ? { ...prev, ...updated } : updated));
+      setZoomLevel(100);
+      if (activeFloor) {
+        await loadRooms(activeFloor.id);
+        await loadDevices(floorPlan.id);
+      }
+      setSaveStatus('SAVED');
+      setLastErrorMessage(null);
+    } catch (err: any) {
+      console.error('Failed to rotate floor plan:', err);
+      setSaveStatus('ERROR');
+      setLastErrorMessage(err?.message || 'Gagal memutar denah');
+      alert(`Gagal memutar denah: ${err?.message || 'Kesalahan sistem'}`);
+    }
+  };
+
   const handleFinishDrawRoom = async (points: PolygonPoint[]) => {
     if (!activeFloor) return;
     setSaveStatus('SAVING');
@@ -1009,6 +1114,57 @@ export const FloorPlanWorkspacePage: React.FC = () => {
     }
   };
 
+  const handleApplyAutoRoomReferences = async (
+    roomsToCreate: GeneratedRoomReference[],
+    replaceExisting: boolean
+  ) => {
+    if (!activeFloor) return;
+    setSaveStatus('SAVING');
+
+    try {
+      if (replaceExisting && rooms.length > 0) {
+        for (const existingRoom of rooms) {
+          try {
+            await roomApi.deleteRoom(existingRoom.id);
+          } catch (delErr) {
+            console.warn(`Failed to delete room ${existingRoom.id}:`, delErr);
+          }
+        }
+      }
+
+      const createdRooms: Room[] = [];
+      for (const r of roomsToCreate) {
+        const created = await roomApi.createRoom(activeFloor.id, {
+          name: r.name,
+          type: r.type,
+          color: r.color,
+          polygonCoordinates: r.polygonCoordinates,
+          ceilingHeight: r.ceilingHeight,
+        });
+        createdRooms.push(created);
+      }
+
+      if (replaceExisting) {
+        setRooms(createdRooms);
+      } else {
+        setRooms((prev) => [...prev, ...createdRooms]);
+      }
+
+      if (createdRooms.length > 0) {
+        setSelectedRoomId(createdRooms[0].id);
+        setToolMode('edit-room');
+      }
+
+      setSaveStatus('SAVED');
+      setLastErrorMessage(null);
+      if (floorPlan) refreshSpatialDetections(floorPlan.id);
+    } catch (err: any) {
+      setSaveStatus('ERROR');
+      setLastErrorMessage(err?.message || 'Gagal menerapkan referensi ruangan');
+      throw err;
+    }
+  };
+
   const handleUpdateRoom = async (roomId: string, data: any) => {
     setSaveStatus('SAVING');
     try {
@@ -1075,11 +1231,49 @@ export const FloorPlanWorkspacePage: React.FC = () => {
     );
   };
 
+  const handleChangeToolMode = (mode: ToolMode) => {
+    setToolMode(mode);
+    if (mode === 'draw-room') {
+      setSelectedObjectId(null);
+      setSelectedRoomId(null);
+      setSelectedDeviceId(null);
+    } else if (mode === 'place-device') {
+      setLeftTab('devices');
+      setIsLeftPanelOpen(true);
+    } else if (mode === 'calibrate') {
+      setSelectedObjectId(null);
+      setSelectedRoomId(null);
+      setSelectedDeviceId(null);
+    }
+  };
+
+  const handleTogglePreviewMonitoring = () => {
+    const next = !isPreviewMonitoring;
+    setIsPreviewMonitoring(next);
+    if (next) {
+      setIsLeftPanelOpen(false);
+      setSelectedDeviceId(null);
+      setSelectedObjectId(null);
+      setSelectedRoomId(null);
+      setToolMode('select');
+    } else {
+      setIsLeftPanelOpen(true);
+    }
+  };
+
   // Selected Entities
   const selectedObject =
     floorPlan?.objects?.find((o) => o.id === selectedObjectId) || null;
   const selectedRoom = rooms.find((r) => r.id === selectedRoomId) || null;
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || null;
+
+  // Dynamic Layout: Hide empty sidebars during monitoring or when nothing is selected
+  const hasInspectorTarget = !isPreviewMonitoring && !!(selectedDevice || selectedRoom || selectedObject);
+  const canvasColSpan = isPreviewMonitoring
+    ? 'lg:col-span-12'
+    : hasInspectorTarget
+    ? 'lg:col-span-6'
+    : 'lg:col-span-9';
 
   // Loading state
   if (isLoading) {
@@ -1181,45 +1375,461 @@ export const FloorPlanWorkspacePage: React.FC = () => {
     );
   }
 
+  // Supporting Studio Configuration Modules for Interactive Sidebar
+  const studioModules = [
+    {
+      id: 'summary',
+      title: 'Ringkasan & Metrik',
+      description: 'Alarm & status perangkat',
+      icon: BarChart3,
+      badge: offlineOrAlertCount > 0 ? `${offlineOrAlertCount} alert` : `${devices.length} IoT`,
+      badgeAlert: offlineOrAlertCount > 0,
+      isActive: isLeftPanelOpen && leftTab === 'summary',
+      onClick: () => {
+        setLeftTab('summary');
+        setIsLeftPanelOpen(true);
+      },
+    },
+    {
+      id: 'devices',
+      title: 'Katalog Perangkat',
+      description: 'Pasang sensor & saklar IoT',
+      icon: Cpu,
+      badge: `${devices.length}`,
+      isActive: isLeftPanelOpen && leftTab === 'devices',
+      onClick: () => {
+        setLeftTab('devices');
+        setIsLeftPanelOpen(true);
+      },
+    },
+    {
+      id: 'rooms',
+      title: 'Zonasi Ruangan',
+      description: 'Poligon & batas ruang',
+      icon: Home,
+      badge: `${rooms.length}`,
+      isActive: isLeftPanelOpen && leftTab === 'rooms',
+      onClick: () => {
+        setLeftTab('rooms');
+        setIsLeftPanelOpen(true);
+      },
+    },
+    {
+      id: 'library',
+      title: 'Mebel & Objek CAD',
+      description: 'Perabot & interior denah',
+      icon: Box,
+      badge: `${floorPlan?.objects?.length || 0}`,
+      isActive: isLeftPanelOpen && leftTab === 'library',
+      onClick: () => {
+        setLeftTab('library');
+        setIsLeftPanelOpen(true);
+      },
+    },
+    {
+      id: 'structure',
+      title: 'Struktur Lantai',
+      description: activeFloor?.name || 'Level lantai aktif',
+      icon: Layers,
+      badge: `${activeHouse?.floors?.length || 1} Lt`,
+      isActive: isLeftPanelOpen && leftTab === 'structure',
+      onClick: () => {
+        setLeftTab('structure');
+        setIsLeftPanelOpen(true);
+      },
+    },
+    {
+      id: 'automation',
+      title: 'Smart Automation',
+      description: 'Aturan logika IF-THEN',
+      icon: Zap,
+      badge: 'IF-THEN',
+      isActive: isAutomationPanelOpen,
+      onClick: () => {
+        setIsAutomationPanelOpen(true);
+      },
+    },
+    {
+      id: 'calibration',
+      title: 'Kalibrasi Skala',
+      description: floorPlan?.isCalibrated
+        ? `${floorPlan.pixelsPerMeter ? floorPlan.pixelsPerMeter.toFixed(0) : ''} px/m`
+        : 'Atur rasio meter denah',
+      icon: Ruler,
+      badge: floorPlan?.isCalibrated ? 'Terkalibrasi' : 'Perlu',
+      isActive: toolMode === 'calibrate' || isCalibrationOpen,
+      onClick: () => {
+        if (floorPlan?.calibrationPoints) {
+          setCalibrationPoint1(floorPlan.calibrationPoints.point1);
+          setCalibrationPoint2(floorPlan.calibrationPoints.point2);
+          setIsCalibrationOpen(true);
+        } else {
+          handleChangeToolMode('calibrate');
+        }
+      },
+    },
+    {
+      id: 'background',
+      title: 'Blueprint Denah',
+      description: floorPlan?.imagePath ? 'Ganti / hapus denah latar' : 'Unggah denah latar',
+      icon: UploadCloud,
+      badge: floorPlan?.imagePath ? 'Tersedia' : 'Kosong',
+      isActive: isUploadBgOpen,
+      onClick: () => {
+        setIsUploadBgOpen(true);
+      },
+    },
+  ];
+
   return (
-    <div className="flex flex-col gap-3.5 p-4 max-w-[1920px] mx-auto min-h-screen">
-      {/* Workspace Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-slate-200/80 shadow-[0_10px_30px_-5px_rgba(112,118,150,0.06)]">
-        <div className="flex items-center gap-3">
-          {role === 'TECHNICIAN' ? (
-            <Link
-              to="/technician"
-              className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
-              title="Kembali ke Ruang Kerja Teknisi"
+    <div className="h-screen w-screen overflow-hidden flex bg-[#EEF2F8] select-none text-[#1E2035] relative font-sans">
+      {/* =========================================================================
+          1. INTERACTIVE STUDIO CONFIGURATION SIDEBAR (Hover to expand with titles)
+          ========================================================================= */}
+      <aside
+        onMouseEnter={() => setIsSidebarHovered(true)}
+        onMouseLeave={() => setIsSidebarHovered(false)}
+        className={`h-full bg-[#E5ECF6] border-r border-[#D7E2F0] flex flex-col justify-between shrink-0 z-30 shadow-md transition-all duration-300 ease-in-out select-none ${
+          isSidebarHovered ? 'w-64 sm:w-72' : 'w-16 sm:w-[70px]'
+        }`}
+      >
+        {/* Top: Donut/Circle Logo + Studio Branding (Revealed on hover) */}
+        <div>
+          <div className="p-3.5 flex items-center gap-3 border-b border-[#D7E2F0]/80 overflow-hidden">
+            <div
+              className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#3B82F6] to-[#7C3AED] p-0.5 shadow-md flex items-center justify-center shrink-0 cursor-pointer hover:scale-105 transition-transform"
+              title="Studio Denah 2D"
             >
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
-          ) : (
-            <Link
-              to="/"
-              className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
-              title="Kembali ke Dashboard Admin"
+              <div className="w-5 h-5 rounded-full bg-[#E5ECF6] border-2 border-white" />
+            </div>
+
+            <div
+              className={`flex flex-col transition-all duration-200 whitespace-nowrap overflow-hidden ${
+                isSidebarHovered ? 'opacity-100 max-w-[200px]' : 'opacity-0 max-w-0 pointer-events-none'
+              }`}
             >
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
-          )}
-          <div className="p-2.5 rounded-2xl bg-purple-50 text-[#8B5CF6] border border-purple-100 shadow-xs">
-            <Radio className="w-5 h-5" />
+              <span className="text-xs font-black text-[#181829] tracking-tight">Studio Denah 2D</span>
+              <span className="text-[10px] text-slate-500 font-medium truncate">Modul Konfigurasi IoT</span>
+            </div>
           </div>
-          <div>
+
+          {/* Module Navigation Items */}
+          <div className="py-3 px-2 flex flex-col gap-1.5 overflow-y-auto no-scrollbar max-h-[calc(100vh-140px)]">
+            {studioModules.map((mod) => (
+              <button
+                key={mod.id}
+                type="button"
+                onClick={mod.onClick}
+                className={`w-full flex items-center gap-3 p-2.5 rounded-2xl transition-all cursor-pointer text-left relative group ${
+                  mod.isActive
+                    ? 'bg-[#4F6BFF] text-white shadow-md shadow-indigo-500/25 font-bold'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+                }`}
+                title={!isSidebarHovered ? mod.title : undefined}
+              >
+                <div className="w-6 h-6 flex items-center justify-center shrink-0">
+                  <mod.icon className="w-5 h-5 transition-transform group-hover:scale-110" />
+                </div>
+
+                <div
+                  className={`flex-1 transition-all duration-200 overflow-hidden ${
+                    isSidebarHovered ? 'opacity-100 max-w-[200px]' : 'opacity-0 max-w-0 pointer-events-none'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-xs font-bold truncate leading-tight">{mod.title}</span>
+                    {mod.badge && (
+                      <span
+                        className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono font-bold shrink-0 ${
+                          mod.isActive
+                            ? 'bg-white/20 text-white'
+                            : mod.badgeAlert
+                            ? 'bg-[#FF5757] text-white animate-pulse'
+                            : 'bg-slate-200/80 text-slate-700'
+                        }`}
+                      >
+                        {mod.badge}
+                      </span>
+                    )}
+                  </div>
+                  <p
+                    className={`text-[10px] truncate mt-0.5 ${
+                      mod.isActive ? 'text-blue-100' : 'text-slate-500'
+                    }`}
+                  >
+                    {mod.description}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Bottom of Sidebar: Canvas Theme Switch & Collapse Hint */}
+        <div className="p-3 border-t border-[#D7E2F0]/80 overflow-hidden">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-extrabold text-[#181829] tracking-tight">
-                Smart Home 2D Floor Plan Studio
-              </h1>
-              {role === 'TECHNICIAN' ? (
-                <Badge className="bg-indigo-50 text-indigo-700 border-indigo-200 text-[10px] font-bold">
-                  Field Specialist
-                </Badge>
-              ) : (
-                <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-[10px] font-bold">
-                  Super Admin
-                </Badge>
-              )}
+              <button
+                type="button"
+                onClick={() => setCanvasTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
+                className="p-2 rounded-xl bg-white/70 hover:bg-white text-slate-600 hover:text-[#4F6BFF] transition-colors shadow-2xs cursor-pointer shrink-0"
+                title={canvasTheme === 'light' ? 'Beralih ke Kanvas Gelap' : 'Beralih ke Kanvas Terang'}
+              >
+                {canvasTheme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4 text-amber-500" />}
+              </button>
+
+              <div
+                className={`flex flex-col transition-all duration-200 whitespace-nowrap overflow-hidden ${
+                  isSidebarHovered ? 'opacity-100 max-w-[150px]' : 'opacity-0 max-w-0 pointer-events-none'
+                }`}
+              >
+                <span className="text-[11px] font-bold text-slate-700">Tema Kanvas</span>
+                <span className="text-[10px] text-slate-500 font-medium">
+                  {canvasTheme === 'light' ? 'Mode Terang' : 'Mode Gelap'}
+                </span>
+              </div>
+            </div>
+
+            {isSidebarHovered && (
+              <span className="text-[9px] font-mono text-slate-400 bg-white/60 px-2 py-0.5 rounded-lg border border-slate-200/60">
+                Studio 2D
+              </span>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      {/* =========================================================================
+          2. MAIN STUDIO WORKSPACE (Right of interactive sidebar)
+          ========================================================================= */}
+      <div className="flex-1 h-full flex flex-col overflow-hidden relative">
+        {/* Top Header Bar: Truly responsive across all viewports & Inspect DevTools */}
+        <header className="h-14 sm:h-16 px-2 sm:px-4 lg:px-6 flex items-center justify-between gap-1.5 sm:gap-2.5 shrink-0 z-20 bg-transparent min-w-0 w-full overflow-x-auto no-scrollbar">
+          {/* 1. Left Group: Back Button + House/Floor Selector Pill */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <Link
+              to={role === 'TECHNICIAN' ? '/technician' : '/'}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/90 hover:bg-white text-slate-700 hover:text-[#4F6BFF] border border-slate-200/90 shadow-xs transition-all text-xs font-bold shrink-0 cursor-pointer group"
+              title="Kembali ke Dashboard Utama"
+            >
+              <ArrowLeft className="w-4 h-4 text-slate-500 group-hover:text-[#4F6BFF] group-hover:-translate-x-0.5 transition-transform" />
+              <span className="hidden sm:inline">Kembali</span>
+            </Link>
+
+            <span className="font-extrabold text-xs text-slate-400 uppercase tracking-wider hidden 2xl:inline">
+              IoT Studio
+            </span>
+
+            {/* Segmented House & Floor Selector Glass Pill */}
+            <div className="flex items-center p-0.5 rounded-2xl bg-white/90 backdrop-blur-md shadow-xs border border-white/80 text-xs shrink-0">
+              {/* House Dropdown */}
+              <div className="flex items-center gap-1 px-2 py-1 rounded-xl font-bold text-[#181829]">
+                <Home className="w-3.5 h-3.5 text-[#4F6BFF] shrink-0" />
+                <select
+                  value={activeHouse?.id || ''}
+                  onChange={(e) => handleSelectHouse(e.target.value)}
+                  disabled={isPreviewMonitoring}
+                  className="bg-transparent text-xs font-bold text-[#181829] focus:outline-none cursor-pointer max-w-[80px] sm:max-w-[110px] truncate"
+                >
+                  {houses.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Floor Dropdown */}
+              <div className="flex items-center gap-1 px-2 py-1 rounded-xl bg-[#F0F4FF] text-[#4F6BFF] font-bold border border-indigo-100 ml-0.5">
+                <Layers className="w-3.5 h-3.5 text-[#4F6BFF] shrink-0" />
+                <select
+                  value={activeFloor?.id || ''}
+                  onChange={(e) => handleSelectFloor(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-[#4F6BFF] focus:outline-none cursor-pointer max-w-[55px] sm:max-w-[80px] truncate"
+                >
+                  {activeHouse?.floors.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+                {!isPreviewMonitoring && (
+                  <div className="flex items-center pl-1 border-l border-indigo-200">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddFloorOpen(true)}
+                      className="p-0.5 rounded-lg text-[#4F6BFF] hover:bg-white transition-colors cursor-pointer"
+                      title="Tambah Lantai Baru"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                    {activeHouse && activeHouse.floors && activeHouse.floors.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleDeleteActiveFloor}
+                        className="p-0.5 rounded-lg text-rose-500 hover:bg-white transition-colors ml-0.5 cursor-pointer"
+                        title={`Hapus ${activeFloor?.name || 'lantai ini'}`}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Handover Status Pill */}
+            {activeHouse?.setupStatus === 'ACTIVE' && (
+              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span className="hidden md:inline">Aktif</span>
+              </span>
+            )}
+            {activeHouse && (activeHouse.setupStatus === 'CONFIGURING' || !activeHouse.setupStatus) && (
+              <button
+                type="button"
+                onClick={handleMarkReadyForHandover}
+                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-600 text-white text-[10px] font-bold shadow-xs hover:bg-emerald-700 transition-colors shrink-0 cursor-pointer"
+                title="Tandai properti siap untuk serah terima (Handover)"
+              >
+                <CheckCircle2 className="w-3 h-3" />
+                <span className="hidden md:inline">Handover</span>
+              </button>
+            )}
+          </div>
+
+          {/* 2. Center Group: Category Filter */}
+          {/* Desktop Version (>= 2xl / 1536px): Full 5 Segmented Buttons */}
+          <div className="hidden 2xl:flex items-center gap-1 bg-white/85 backdrop-blur-md p-1 rounded-full shadow-xs border border-white/60 text-xs font-semibold shrink-0">
+            {[
+              { id: 'Overview', label: 'Overview', count: devices.length },
+              { id: 'Engine room', label: 'Engine', count: controlDevicesCount },
+              { id: 'Internet device', label: 'Sensor', count: sensorDevicesCount },
+              { id: 'Office device', label: 'Office', count: visualDevicesCount },
+              { id: 'Other device', label: 'Other', count: otherOrObjectsCount },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setSelectedCategoryTab(tab.id);
+                  if (tab.id === 'Overview') {
+                    setLeftTab('summary');
+                  } else if (tab.id === 'Other device') {
+                    setLeftTab('library');
+                  } else {
+                    setLeftTab('devices');
+                  }
+                  setIsLeftPanelOpen(true);
+                }}
+                className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer ${
+                  selectedCategoryTab === tab.id
+                    ? 'bg-[#4F6BFF] text-white shadow-md shadow-indigo-500/25'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                }`}
+                title={`Filter kategori ${tab.id} (${tab.count} perangkat)`}
+              >
+                <span>{tab.label}</span>
+                <span
+                  className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                    selectedCategoryTab === tab.id
+                      ? 'bg-white/25 text-white'
+                      : 'bg-slate-200/70 text-slate-700'
+                  }`}
+                >
+                  {tab.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Compact Dropdown Version (< 1536px, e.g. Inspect DevTools opened / Laptop / Tablet): Fits cleanly */}
+          <div className="2xl:hidden flex items-center shrink-0">
+            <div className="flex items-center gap-1.5 bg-white/90 backdrop-blur-md px-2.5 py-1 rounded-full shadow-xs border border-white/80 text-xs font-bold text-slate-700">
+              <span className="w-2 h-2 rounded-full bg-[#4F6BFF] animate-pulse shrink-0" />
+              <span className="text-slate-400 font-medium hidden md:inline text-[11px]">Kategori:</span>
+              <select
+                value={selectedCategoryTab}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedCategoryTab(val);
+                  if (val === 'Overview') {
+                    setLeftTab('summary');
+                  } else if (val === 'Other device') {
+                    setLeftTab('library');
+                  } else {
+                    setLeftTab('devices');
+                  }
+                  setIsLeftPanelOpen(true);
+                }}
+                className="bg-transparent text-xs font-bold text-[#181829] focus:outline-none cursor-pointer max-w-[130px]"
+              >
+                <option value="Overview">Overview ({devices.length})</option>
+                <option value="Engine room">Engine ({controlDevicesCount})</option>
+                <option value="Internet device">Sensor ({sensorDevicesCount})</option>
+                <option value="Office device">Office ({visualDevicesCount})</option>
+                <option value="Other device">Other ({otherOrObjectsCount})</option>
+              </select>
+            </div>
+          </div>
+
+          {/* 3. Right Group: Telemetry, Mode Switcher, Publish, Save */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Live Telemetry: Clock & Weather (Combined in one compact chip, visible only on wide screen >= 2xl) */}
+            <div className="hidden 2xl:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/80 backdrop-blur-md border border-white/80 text-xs font-mono font-bold text-slate-700 shadow-2xs shrink-0">
+              <div className="flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5 text-slate-400" />
+                <span>{currentTime || '11:25 AM'}</span>
+              </div>
+              <span className="text-slate-300">•</span>
+              <div className="flex items-center gap-1">
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
+                <span>28°C</span>
+              </div>
+            </div>
+
+            {/* Mode Switcher: Desain vs Preview Monitoring */}
+            <div className="flex items-center p-0.5 rounded-xl bg-slate-200/70 border border-slate-300/60 text-xs font-bold shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  if (isPreviewMonitoring) handleTogglePreviewMonitoring();
+                }}
+                className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg transition-all text-xs cursor-pointer ${
+                  !isPreviewMonitoring
+                    ? 'bg-white text-[#4F6BFF] shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Mode Desain / Konfigurasi"
+              >
+                <PenTool className="w-3.5 h-3.5 sm:hidden text-[#4F6BFF]" />
+                <span className="hidden sm:inline">Desain</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isPreviewMonitoring) handleTogglePreviewMonitoring();
+                }}
+                className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg transition-all text-xs cursor-pointer ${
+                  isPreviewMonitoring
+                    ? 'bg-[#4F6BFF] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Preview Monitoring Live"
+              >
+                <Eye className="w-3.5 h-3.5 sm:hidden" />
+                <span className="hidden sm:inline">Monitoring</span>
+              </button>
+            </div>
+
+            {/* Publish Trigger */}
+            <button
+              type="button"
+              onClick={() => setIsPublishModalOpen(true)}
+              className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl bg-white/90 border border-slate-200 shadow-xs hover:border-[#4F6BFF] text-xs font-semibold transition-all shrink-0 cursor-pointer"
+              title="Kelola status publikasi dashboard"
+            >
+              <Send className="w-3.5 h-3.5 text-[#4F6BFF]" />
               <Badge
                 variant={
                   publishStatus === 'PUBLISHED'
@@ -1228,301 +1838,49 @@ export const FloorPlanWorkspacePage: React.FC = () => {
                     ? 'purple'
                     : 'default'
                 }
-                className="text-[10px] font-mono font-bold"
+                className="text-[9.5px] font-mono font-bold"
               >
                 {publishStatus}
               </Badge>
-              {isPreviewMonitoring && (
-                <div className="flex items-center gap-1.5">
-                  <Badge variant="purple" className="text-[10px] uppercase font-mono flex items-center gap-1.5 shadow-xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                    <span>[VIRTUAL DEVICE / SIMULATED]</span>
-                  </Badge>
-                  {lastTelemetryTime && (
-                    <span className="text-[10px] font-mono font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded">
-                      Sync: {lastTelemetryTime.toLocaleTimeString()}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-[#71758E] mt-0.5">
-              Dashboard konfigurasi perangkat IoT, penempatan ikon denah, dan publikasi monitoring
-            </p>
-          </div>
-        </div>
-
-        {/* Quick Summary Pills */}
-        <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-[#71758E]">
-          <span className="font-bold text-[#181829]">{activeHouse?.name}</span>
-          <span>•</span>
-          <span className="font-bold text-purple-700">{activeFloor?.name}</span>
-          <span>•</span>
-          <span className="font-bold text-purple-900 bg-purple-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-            <Cpu className="w-3.5 h-3.5 text-purple-600" />
-            <span>
-              Perangkat: {devices.length}
-              {quota?.maxDevices ? ` / ${quota.maxDevices}` : ''}
-            </span>
-          </span>
-          <span>•</span>
-          <span className="font-semibold text-slate-600">{rooms.length} Ruangan</span>
-
-          {/* Phase 11 Handover Action & Status Badges */}
-          {activeHouse && (activeHouse.setupStatus === 'CONFIGURING' || !activeHouse.setupStatus) && (
-            <button
-              type="button"
-              onClick={handleMarkReadyForHandover}
-              className="flex items-center gap-1 px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
-              title="Tandai properti siap untuk serah terima (Handover)"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Ajukan Siap Handover</span>
             </button>
-          )}
 
-          {activeHouse?.setupStatus === 'READY_FOR_HANDOVER' && (
-            <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-xs font-bold flex items-center gap-1">
-              <Clock className="w-3.5 h-3.5 text-amber-600" />
-              <span>Menunggu Handover Admin</span>
-            </Badge>
-          )}
-
-          {activeHouse?.setupStatus === 'ACTIVE' && (
-            <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-xs font-bold flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Properti Aktif</span>
-            </Badge>
-          )}
-
-          <button
-            onClick={() => setIsAutomationPanelOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 ml-1 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold shadow-xs transition-colors"
-            title="Buka Smart Home Automation Engine"
-          >
-            <Zap className="w-3.5 h-3.5 fill-current" />
-            <span>Otomasi</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Main Toolbar */}
-      <FloorPlanToolbar
-        houses={houses}
-        activeHouse={activeHouse}
-        activeFloor={activeFloor}
-        floorPlan={floorPlan}
-        toolMode={toolMode}
-        onChangeToolMode={(mode) => {
-          setToolMode(mode);
-          if (mode === 'draw-room') {
-            setSelectedObjectId(null);
-            setSelectedRoomId(null);
-            setSelectedDeviceId(null);
-          } else if (mode === 'place-device') {
-            setLeftTab('devices');
-          } else if (mode === 'calibrate') {
-            setSelectedObjectId(null);
-            setSelectedRoomId(null);
-            setSelectedDeviceId(null);
-          }
-        }}
-        onSelectHouse={handleSelectHouse}
-        onSelectFloor={handleSelectFloor}
-        onOpenAddFloor={() => setIsAddFloorOpen(true)}
-        onOpenUploadBackground={() => setIsUploadBgOpen(true)}
-        hasBackgroundImage={!!floorPlan?.imagePath}
-        onDeleteBackground={handleToolbarDeleteBackground}
-        onDeleteActiveFloor={handleDeleteActiveFloor}
-        showGrid={showGrid}
-        onToggleGrid={() => setShowGrid(!showGrid)}
-        snapToGrid={snapToGrid}
-        onToggleSnap={handleToggleSnap}
-        showRoomPolygons={showRoomPolygons}
-        onToggleRoomPolygons={() => setShowRoomPolygons(!showRoomPolygons)}
-        onOpenCalibrationModal={() => {
-          if (floorPlan?.calibrationPoints) {
-            setCalibrationPoint1(floorPlan.calibrationPoints.point1);
-            setCalibrationPoint2(floorPlan.calibrationPoints.point2);
-            setIsCalibrationOpen(true);
-          } else {
-            setToolMode('calibrate');
-          }
-        }}
-        canUndo={history.length > 1}
-        onUndo={handleUndo}
-        canRedo={future.length > 0}
-        onRedo={handleRedo}
-        zoomLevel={zoomLevel}
-        onZoomIn={() => setZoomLevel((z) => Math.min(400, z + 15))}
-        onZoomOut={() => setZoomLevel((z) => Math.max(25, z - 15))}
-        onResetZoom={() => setZoomLevel(100)}
-        saveStatus={saveStatus}
-        lastErrorMessage={lastErrorMessage}
-        onResetCalibration={handleResetCalibration}
-        isPreviewMonitoring={isPreviewMonitoring}
-        onTogglePreviewMonitoring={() => {
-          const next = !isPreviewMonitoring;
-          setIsPreviewMonitoring(next);
-          if (next) {
-            setSelectedDeviceId(null);
-            setSelectedObjectId(null);
-            setSelectedRoomId(null);
-            setToolMode('select');
-          }
-        }}
-        publishStatus={publishStatus}
-        onOpenPublishModal={() => setIsPublishModalOpen(true)}
-        onOpenAutomationModal={() => setIsAutomationPanelOpen(true)}
-      />
-
-      {/* 3-Pane Workspace Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 h-[calc(100vh-230px)] min-h-[640px]">
-        {/* =========================================================================
-            LEFT PANEL (3 cols): IoT Catalog, Furniture Library, Rooms, Structure
-            ========================================================================= */}
-        <div className="lg:col-span-3 h-full flex flex-col bg-white rounded-3xl border border-slate-200/80 shadow-[0_10px_30px_-5px_rgba(112,118,150,0.06)] overflow-hidden">
-          {/* Tab Switcher */}
-          <div className="p-2 border-b border-slate-100 flex items-center gap-1 bg-slate-50/50">
-            <button
-              onClick={() => setLeftTab('devices')}
-              className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all ${
-                leftTab === 'devices'
-                  ? 'bg-purple-600 text-white shadow-xs'
-                  : 'text-[#71758E] hover:text-[#181829]'
-              }`}
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              <span>IoT ({devices.length})</span>
-            </button>
-            <button
-              onClick={() => setLeftTab('rooms')}
-              className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all ${
-                leftTab === 'rooms'
-                  ? 'bg-purple-600 text-white shadow-xs'
-                  : 'text-[#71758E] hover:text-[#181829]'
-              }`}
-            >
-              <Home className="w-3.5 h-3.5" />
-              <span>Ruang ({rooms.length})</span>
-            </button>
-            <button
-              onClick={() => setLeftTab('library')}
-              className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all ${
-                leftTab === 'library'
-                  ? 'bg-purple-600 text-white shadow-xs'
-                  : 'text-[#71758E] hover:text-[#181829]'
-              }`}
-            >
-              <Box className="w-3.5 h-3.5" />
-              <span>Mebel</span>
-            </button>
-            <button
-              onClick={() => setLeftTab('structure')}
-              className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-xs font-bold transition-all ${
-                leftTab === 'structure'
-                  ? 'bg-purple-600 text-white shadow-xs'
-                  : 'text-[#71758E] hover:text-[#181829]'
-              }`}
-            >
-              <FolderTree className="w-3.5 h-3.5" />
-              <span>Lantai</span>
-            </button>
-          </div>
-
-          {/* Panel Body */}
-          <div className="flex-1 overflow-hidden">
-            {leftTab === 'devices' && (
-              <DeviceLibraryPanel
-                selectedCatalogItem={selectedCatalogItem}
-                onSelectCatalogItem={handleSelectCatalogItem}
-                placedDevicesCount={devices.length}
-                placedDevices={devices}
-                selectedDeviceId={selectedDeviceId}
-                onSelectPlacedDevice={(devId) => {
-                  setSelectedDeviceId(devId);
-                  setSelectedObjectId(null);
-                  setSelectedRoomId(null);
-                  setToolMode('select');
-                }}
-                quota={quota}
-              />
-            )}
-
-            {leftTab === 'rooms' && (
-              <RoomExplorerPanel
-                rooms={rooms}
-                selectedRoomId={selectedRoomId}
-                onSelectRoom={(id) => {
-                  setSelectedRoomId(id);
-                  setSelectedObjectId(null);
-                  setSelectedDeviceId(null);
-                }}
-                onStartDrawRoom={() => {
-                  setDrawingTargetRoomId(null);
-                  setToolMode('draw-room');
-                }}
-                onDeleteRoom={handleDeleteRoom}
-                hiddenRoomIds={hiddenRoomIds}
-                onToggleRoomVisibility={handleToggleRoomVisibility}
-                onEditRoomPolygon={(id) => {
-                  const targetRoom = rooms.find((r) => r.id === id);
-                  if (targetRoom && targetRoom.polygonCoordinates && targetRoom.polygonCoordinates.length >= 3) {
-                    setSelectedRoomId(id);
-                    setToolMode('edit-room');
-                  } else {
-                    setDrawingTargetRoomId(id);
-                    setSelectedRoomId(id);
-                    setToolMode('draw-room');
-                  }
-                }}
-              />
-            )}
-
-            {leftTab === 'library' && (
-              <ObjectLibraryPanel
-                onAddObject={(catalogItem) => handleAddObject(catalogItem)}
-              />
-            )}
-
-            {leftTab === 'structure' && (
-              <div className="p-4 space-y-3 overflow-y-auto h-full text-xs">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                  <span className="font-bold text-[#181829]">Lantai Terdaftar</span>
-                  <Badge variant="purple">{activeHouse?.floors.length || 0} Lantai</Badge>
-                </div>
-                {activeHouse?.floors.map((fl) => (
+            {/* Save Status Indicator */}
+            {!isPreviewMonitoring && (
+              <div className="flex items-center shrink-0">
+                {saveStatus === 'SAVED' && (
                   <div
-                    key={fl.id}
-                    onClick={() => handleSelectFloor(fl.id)}
-                    className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
-                      fl.id === activeFloor?.id
-                        ? 'border-purple-500 bg-purple-50/50 shadow-xs'
-                        : 'border-slate-200 hover:border-purple-200'
-                    }`}
+                    className="w-7 h-7 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center shadow-xs"
+                    title="Semua perubahan tersimpan otomatis"
                   >
-                    <div>
-                      <div className="font-bold text-[#181829]">{fl.name}</div>
-                      <div className="text-[11px] text-[#71758E]">
-                        Tingkat: {fl.levelNumber}
-                      </div>
-                    </div>
-                    {fl.id === activeFloor?.id && (
-                      <Badge variant="purple">
-                        Aktif
-                      </Badge>
-                    )}
+                    <CheckCircle2 className="w-4 h-4" />
                   </div>
-                ))}
+                )}
+                {saveStatus === 'SAVING' && (
+                  <div
+                    className="w-7 h-7 rounded-full bg-purple-50 border border-purple-200 text-purple-600 flex items-center justify-center shadow-xs"
+                    title="Menyimpan..."
+                  >
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  </div>
+                )}
+                {saveStatus === 'ERROR' && (
+                  <div
+                    className="w-7 h-7 rounded-full bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center shadow-xs cursor-help"
+                    title={lastErrorMessage || 'Gagal menyimpan perubahan'}
+                  >
+                    <AlertCircle className="w-4 h-4" />
+                  </div>
+                )}
               </div>
             )}
           </div>
-        </div>
+        </header>
 
         {/* =========================================================================
-            CENTER CANVAS (6 cols): SVG Floor Plan Canvas + Interactive Devices
+            3. BOUNDLESS CANVAS VIEWPORT & FLOATING OVERLAYS
             ========================================================================= */}
-        <div className="lg:col-span-6 h-full flex flex-col bg-[#0F172A] rounded-3xl border border-slate-800 shadow-2xl overflow-hidden relative">
+        <main className="flex-1 w-full h-full relative overflow-hidden bg-[#EEF2F8]">
+          {/* SVG Floor Plan Canvas */}
           {floorPlan ? (
             <FloorPlanCanvas
               floorPlan={floorPlan}
@@ -1576,77 +1934,667 @@ export const FloorPlanWorkspacePage: React.FC = () => {
               onZoomChange={setZoomLevel}
               isPreviewMonitoring={isPreviewMonitoring}
               showRoomPolygons={showRoomPolygons}
+              labelDisplayMode={labelDisplayMode}
+              canvasTheme={canvasTheme}
+              categoryFilter={selectedCategoryTab}
+              onClearCategoryFilter={() => setSelectedCategoryTab('Overview')}
             />
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-6 text-center">
-              <AlertCircle className="w-8 h-8 text-slate-500 mb-2" />
-              <p className="text-xs font-semibold text-slate-300">Denah tidak tersedia</p>
-              <p className="text-[11px] text-slate-500 mt-1">Pilih lantai lain atau buat denah baru.</p>
+            <div className="flex-1 w-full h-full flex flex-col items-center justify-center text-slate-400 p-6 text-center">
+              <AlertCircle className="w-10 h-10 text-slate-500 mb-2" />
+              <p className="text-sm font-semibold text-slate-700">Denah tidak tersedia</p>
+              <p className="text-xs text-slate-500 mt-1">Pilih lantai lain atau buat denah baru.</p>
             </div>
           )}
-        </div>
 
-        {/* =========================================================================
-            RIGHT PANEL (3 cols): Contextual Inspector (Device / Room / Object)
-            ========================================================================= */}
-        <div className="lg:col-span-3 h-full flex flex-col bg-white rounded-3xl border border-slate-200/80 shadow-[0_10px_30px_-5px_rgba(112,118,150,0.06)] overflow-hidden">
-          {selectedDevice ? (
-            <DeviceInspectorPanel
-              device={selectedDevice}
-              rooms={rooms}
-              onUpdateDevice={handleUpdateDevice}
-              onDeleteDevice={handleDeleteDevice}
-              onClose={() => setSelectedDeviceId(null)}
-            />
-          ) : selectedRoom ? (
-            <RoomInspectorPanel
-              room={selectedRoom}
-              linkedObjects={floorPlan?.objects.filter((o) => o.roomId === selectedRoom.id) || []}
-              onUpdateRoom={(roomId, updates) => handleUpdateRoom(roomId, updates)}
-              onDeleteRoom={(roomId) => handleDeleteRoom(roomId)}
-              onEditPolygon={(roomId) => {
-                if (selectedRoom.polygonCoordinates && selectedRoom.polygonCoordinates.length >= 3) {
-                  setToolMode('edit-room');
-                } else {
-                  setDrawingTargetRoomId(roomId);
-                  setToolMode('draw-room');
-                }
-              }}
-              onSelectObject={(objId) => {
-                setSelectedObjectId(objId);
-                setSelectedRoomId(null);
-              }}
-              isCalibrated={!!floorPlan?.isCalibrated}
-            />
-          ) : selectedObject ? (
-            <ObjectInspectorPanel
-              floorPlan={floorPlan}
-              selectedObject={selectedObject}
-              rooms={rooms}
-              suggestedRoomId={spatialDetections[selectedObject.id]}
-              onAssignRoom={handleAssignObjectRoom}
-              onUpdateObject={handleUpdateObject}
-              onDeleteObject={handleDeleteObject}
-              onDuplicateObject={handleDuplicateObject}
-              onBringForward={handleBringForward}
-              onSendBackward={handleSendBackward}
-              onBringToFront={handleBringToFront}
-              onSendToBack={handleSendToBack}
-              onUpdatePlanConfig={handleUpdatePlanConfig}
-              onOpenUploadBackground={() => setIsUploadBgOpen(true)}
-              onDeleteBackground={handleDeleteBackground}
-              onClose={() => setSelectedObjectId(null)}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full p-6 text-center text-slate-400">
-              <Cpu className="w-10 h-10 mb-2 stroke-1 text-slate-300" />
-              <p className="text-xs font-semibold text-slate-600">Tidak Ada Elemen Dipilih</p>
-              <p className="text-[11px] text-[#71758E] mt-1 max-w-[220px]">
-                Klik ikon perangkat IoT, poligon ruangan, atau mebel pada denah untuk mengonfigurasi.
-              </p>
+          {/* =======================================================================
+              CENTER FLOATING CAD TOOLS (Figma / Miro style hovering island)
+              ======================================================================= */}
+          {!isPreviewMonitoring && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-white/95 backdrop-blur-xl p-1.5 rounded-2xl border border-slate-200/90 shadow-xl pointer-events-auto">
+              <button
+                type="button"
+                onClick={() => handleChangeToolMode('select')}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  toolMode === 'select'
+                    ? 'bg-[#4F6BFF] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                title="Mode Pilih & Geser Objek / Perangkat (V)"
+              >
+                <MousePointer className="w-3.5 h-3.5" />
+                <span>Pilih</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleChangeToolMode('draw-room')}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  toolMode === 'draw-room'
+                    ? 'bg-[#4F6BFF] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                title="Mode Gambar Poligon Ruangan (R)"
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                <span>Gambar Ruang</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsAutoRoomRefOpen(true)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all text-purple-700 bg-purple-50 hover:bg-purple-100 hover:text-purple-900 border border-purple-200/80 shadow-2xs cursor-pointer"
+                title="Hasilkan referensi partisi ruangan otomatis di atas kanvas denah"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                <span className="hidden sm:inline">Auto Ruangan</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (floorPlan?.calibrationPoints) {
+                    setCalibrationPoint1(floorPlan.calibrationPoints.point1);
+                    setCalibrationPoint2(floorPlan.calibrationPoints.point2);
+                    setIsCalibrationOpen(true);
+                  } else {
+                    handleChangeToolMode('calibrate');
+                  }
+                }}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  toolMode === 'calibrate'
+                    ? 'bg-[#4F6BFF] text-white shadow-xs'
+                    : floorPlan?.isCalibrated
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                title="Kalibrasi Skala 2-Titik (K)"
+              >
+                <Ruler className="w-3.5 h-3.5" />
+                <span className="font-mono text-[11px]">
+                  {floorPlan?.isCalibrated
+                    ? `${floorPlan.pixelsPerMeter ? floorPlan.pixelsPerMeter.toFixed(0) : ''}px/m`
+                    : 'Skala'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleChangeToolMode('place-device')}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  toolMode === 'place-device'
+                    ? 'bg-[#4F6BFF] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                title="Pasang Perangkat IoT (P)"
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>Pasang IoT</span>
+              </button>
+
+              <div className="h-4 w-px bg-slate-200 mx-0.5" />
+
+              {/* Undo / Redo */}
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={history.length <= 1}
+                className="p-1.5 rounded-xl text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                title="Undo (Ctrl+Z)"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={future.length === 0}
+                className="p-1.5 rounded-xl text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                title="Redo (Ctrl+Y)"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
-        </div>
+
+          {/* =======================================================================
+              4. FLOATING LEFT PANEL: THE HERO DASHBOARD CARDS (Matching Reference!)
+              ======================================================================= */}
+          {!isPreviewMonitoring && isLeftPanelOpen && (
+            <div className="absolute top-3 left-6 z-20 w-[360px] sm:w-[390px] flex flex-col gap-3 max-h-[calc(100vh-100px)] overflow-y-auto no-scrollbar pointer-events-auto animate-in fade-in slide-in-from-left duration-200">
+              {/* Header Tab Switcher Pill */}
+              <div className="flex items-center justify-between p-1 rounded-2xl bg-white/90 backdrop-blur-md shadow-xs border border-white/80 shrink-0">
+                <div className="flex items-center gap-0.5 flex-1 overflow-x-auto no-scrollbar">
+                  <button
+                    type="button"
+                    onClick={() => setLeftTab('summary')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      leftTab === 'summary'
+                        ? 'bg-[#4F6BFF] text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Ringkasan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLeftTab('devices')}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                      leftTab === 'devices'
+                        ? 'bg-[#4F6BFF] text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Cpu className="w-3.5 h-3.5" />
+                    <span>Katalog ({devices.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLeftTab('rooms')}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                      leftTab === 'rooms'
+                        ? 'bg-[#4F6BFF] text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Home className="w-3.5 h-3.5" />
+                    <span>Ruang ({rooms.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLeftTab('library')}
+                    className={`px-2 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      leftTab === 'library'
+                        ? 'bg-[#4F6BFF] text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Mebel
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsLeftPanelOpen(false)}
+                  className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors ml-1"
+                  title="Tutup Panel"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* TAB 1: SUMMARY (The exact 3 reference dashboard cards!) */}
+              {leftTab === 'summary' && (
+                <>
+                  {/* Card Row 1: Alarms Pills */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-white/90 backdrop-blur-xl p-3.5 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-slate-700 leading-tight">
+                        Equipment<br />alarm
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full bg-[#FF5757] text-white font-mono text-xs font-black shadow-xs shadow-red-500/20">
+                        {offlineOrAlertCount}
+                      </span>
+                    </div>
+
+                    <div className="bg-white/90 backdrop-blur-xl p-3.5 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-slate-700 leading-tight">
+                        Personnel<br />alarm
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono text-xs font-black border border-slate-200">
+                        0
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Card 2: "All Internet of Things Equipment" Progress & Legend */}
+                  <div className="bg-white/90 backdrop-blur-xl p-5 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white space-y-3.5">
+                    <div>
+                      <h3 className="text-xs font-extrabold text-slate-600 tracking-tight">
+                        All Internet of Things Equipment
+                      </h3>
+                      <div className="flex items-baseline gap-2 mt-1">
+                        <span className="text-3xl font-black text-slate-900 tracking-tight">
+                          {devices.length.toLocaleString()}
+                        </span>
+                        <span className="text-[11px] font-mono font-bold text-slate-400">
+                          - {quota?.maxDevices ? `${quota.maxDevices - devices.length} sisa kuota` : 'aktif'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar matching reference */}
+                    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden flex">
+                      <div
+                        style={{ width: `${normalPercent}%` }}
+                        className="bg-gradient-to-r from-[#4F6BFF] to-[#38BDF8] h-full"
+                      />
+                      <div
+                        style={{ width: `${alertPercent}%` }}
+                        className="bg-[#FF6584] h-full"
+                      />
+                      <div
+                        style={{ width: `${Math.max(0, 100 - normalPercent - alertPercent)}%` }}
+                        className="bg-slate-200 h-full"
+                      />
+                    </div>
+
+                    {/* Legend breakdown matching reference */}
+                    <div className="space-y-1.5 text-xs pt-1">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full border-2 border-[#4F6BFF] bg-white inline-block" />
+                          <span className="font-semibold text-slate-700">Normal</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono font-bold text-slate-800">{onlineDevicesCount}</span>
+                          <span className="font-mono text-slate-400 text-[11px] w-9 text-right">{normalPercent}%</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full border-2 border-[#FF5757] bg-white inline-block" />
+                          <span className="font-semibold text-slate-700">Breakdown</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono font-bold text-[#FF5757]">{offlineOrAlertCount}</span>
+                          <span className="font-mono text-slate-400 text-[11px] w-9 text-right">{alertPercent}%</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full border-2 border-slate-400 bg-white inline-block" />
+                          <span className="font-semibold text-slate-700">Offline / Standby</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono font-bold text-slate-600">{devices.length - onlineDevicesCount}</span>
+                          <span className="font-mono text-slate-400 text-[11px] w-9 text-right">
+                            {Math.max(0, 100 - normalPercent)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 3: "Equipment overview" 2x2 Grid */}
+                  <div className="bg-white/90 backdrop-blur-xl p-5 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white space-y-3">
+                    <h3 className="text-xs font-extrabold text-slate-700 tracking-tight">
+                      Equipment overview
+                    </h3>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {/* 1. Engine room (Kontrol) */}
+                      <div
+                        onClick={() => {
+                          setSelectedCategoryTab('Engine room');
+                          setLeftTab('devices');
+                        }}
+                        className="p-3 rounded-2xl bg-slate-50/80 hover:bg-amber-50/50 border border-slate-100 hover:border-amber-200 transition-all cursor-pointer space-y-2 group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-slate-600 group-hover:text-amber-800 truncate">
+                            Engine room
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                            <Power className="w-3.5 h-3.5" />
+                          </div>
+                          <span className="text-xl font-black text-slate-900 font-mono">
+                            {controlDevicesCount}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 flex items-center justify-between">
+                          <span>Connection rate</span>
+                          <span className="font-bold text-slate-700">92%</span>
+                        </div>
+                      </div>
+
+                      {/* 2. Networking device (Sensor) */}
+                      <div
+                        onClick={() => {
+                          setSelectedCategoryTab('Internet device');
+                          setLeftTab('devices');
+                        }}
+                        className="p-3 rounded-2xl bg-slate-50/80 hover:bg-emerald-50/50 border border-slate-100 hover:border-emerald-200 transition-all cursor-pointer space-y-2 group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-slate-600 group-hover:text-emerald-800 truncate">
+                            Networking
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                            <Activity className="w-3.5 h-3.5" />
+                          </div>
+                          <span className="text-xl font-black text-slate-900 font-mono">
+                            {sensorDevicesCount}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 flex items-center justify-between">
+                          <span>Connection rate</span>
+                          <span className="font-bold text-slate-700">98%</span>
+                        </div>
+                      </div>
+
+                      {/* 3. Office device (Visual & CCTV - Active Hero Style from reference!) */}
+                      <div
+                        onClick={() => {
+                          setSelectedCategoryTab('Office device');
+                          setLeftTab('devices');
+                        }}
+                        className="p-3 rounded-2xl bg-gradient-to-br from-[#4F6BFF] to-[#3B82F6] text-white shadow-md shadow-indigo-500/20 transition-all cursor-pointer space-y-2 group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-blue-100 truncate">
+                            Office device
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-xl bg-white/20 text-white flex items-center justify-center shrink-0">
+                            <Video className="w-3.5 h-3.5" />
+                          </div>
+                          <span className="text-xl font-black text-white font-mono">
+                            {visualDevicesCount}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-blue-100 flex items-center justify-between">
+                          <span>Connection rate</span>
+                          <span className="font-bold text-white">82%</span>
+                        </div>
+                      </div>
+
+                      {/* 4. Other device (Mebel & Ruang) */}
+                      <div
+                        onClick={() => {
+                          setLeftTab('rooms');
+                        }}
+                        className="p-3 rounded-2xl bg-slate-50/80 hover:bg-purple-50/50 border border-slate-100 hover:border-purple-200 transition-all cursor-pointer space-y-2 group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-slate-600 group-hover:text-purple-800 truncate">
+                            Other device
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-xl bg-purple-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                            <Box className="w-3.5 h-3.5" />
+                          </div>
+                          <span className="text-xl font-black text-slate-900 font-mono">
+                            {otherOrObjectsCount}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 flex items-center justify-between">
+                          <span>Connection rate</span>
+                          <span className="font-bold text-slate-700">78%</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* TAB 2, 3, 4: INTERACTIVE PANELS (Katalog IoT, Ruangan, Mebel, Lantai) */}
+              {leftTab !== 'summary' && (
+                <div className="bg-white/95 backdrop-blur-2xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-white flex flex-col h-[560px] overflow-hidden">
+                  <div className="flex-1 overflow-hidden">
+                    {leftTab === 'devices' && (
+                      <DeviceLibraryPanel
+                        selectedCatalogItem={selectedCatalogItem}
+                        onSelectCatalogItem={handleSelectCatalogItem}
+                        placedDevicesCount={devices.length}
+                        placedDevices={devices}
+                        selectedDeviceId={selectedDeviceId}
+                        onSelectPlacedDevice={(devId) => {
+                          setSelectedDeviceId(devId);
+                          setSelectedObjectId(null);
+                          setSelectedRoomId(null);
+                          setToolMode('select');
+                        }}
+                        quota={quota}
+                        categoryFilter={selectedCategoryTab}
+                        onClearCategoryFilter={() => setSelectedCategoryTab('Overview')}
+                      />
+                    )}
+
+                    {leftTab === 'rooms' && (
+                      <RoomExplorerPanel
+                        rooms={rooms}
+                        selectedRoomId={selectedRoomId}
+                        onSelectRoom={(id) => {
+                          setSelectedRoomId(id);
+                          setSelectedObjectId(null);
+                          setSelectedDeviceId(null);
+                        }}
+                        onStartDrawRoom={() => {
+                          setDrawingTargetRoomId(null);
+                          setToolMode('draw-room');
+                        }}
+                        onDeleteRoom={handleDeleteRoom}
+                        hiddenRoomIds={hiddenRoomIds}
+                        onToggleRoomVisibility={handleToggleRoomVisibility}
+                        onEditRoomPolygon={(id) => {
+                          const targetRoom = rooms.find((r) => r.id === id);
+                          if (targetRoom && targetRoom.polygonCoordinates && targetRoom.polygonCoordinates.length >= 3) {
+                            setSelectedRoomId(id);
+                            setToolMode('edit-room');
+                          } else {
+                            setDrawingTargetRoomId(id);
+                            setSelectedRoomId(id);
+                            setToolMode('draw-room');
+                          }
+                        }}
+                        onOpenAutoRoomReference={() => setIsAutoRoomRefOpen(true)}
+                      />
+                    )}
+
+                    {leftTab === 'library' && (
+                      <ObjectLibraryPanel
+                        onAddObject={(catalogItem) => handleAddObject(catalogItem)}
+                      />
+                    )}
+
+                    {leftTab === 'structure' && (
+                      <div className="p-4 space-y-3 overflow-y-auto h-full text-xs">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                          <span className="font-bold text-[#181829]">Lantai Terdaftar</span>
+                          <Badge variant="purple">{activeHouse?.floors.length || 0} Lantai</Badge>
+                        </div>
+                        {activeHouse?.floors.map((fl) => (
+                          <div
+                            key={fl.id}
+                            onClick={() => handleSelectFloor(fl.id)}
+                            className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
+                              fl.id === activeFloor?.id
+                                ? 'border-[#4F6BFF] bg-blue-50/50 shadow-xs'
+                                : 'border-slate-200 hover:border-blue-200'
+                            }`}
+                          >
+                            <div>
+                              <div className="font-bold text-[#181829]">{fl.name}</div>
+                              <div className="text-[11px] text-[#71758E]">
+                                Tingkat: {fl.levelNumber}
+                              </div>
+                            </div>
+                            {fl.id === activeFloor?.id && (
+                              <Badge variant="purple">Aktif</Badge>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* =======================================================================
+              5. CONTEXTUAL RIGHT INSPECTOR PANEL (Device / Room / Object)
+              ======================================================================= */}
+          {hasInspectorTarget && (
+            <aside className="absolute top-3 right-6 bottom-3 w-[360px] sm:w-[390px] z-20 bg-white/95 backdrop-blur-2xl rounded-3xl shadow-2xl border border-slate-200/90 flex flex-col overflow-hidden animate-in fade-in slide-in-from-right duration-200">
+              {selectedDevice ? (
+                <DeviceInspectorPanel
+                  device={selectedDevice}
+                  rooms={rooms}
+                  onUpdateDevice={handleUpdateDevice}
+                  onDeleteDevice={handleDeleteDevice}
+                  onClose={() => setSelectedDeviceId(null)}
+                />
+              ) : selectedRoom ? (
+                <RoomInspectorPanel
+                  room={selectedRoom}
+                  linkedObjects={floorPlan?.objects.filter((o) => o.roomId === selectedRoom.id) || []}
+                  onUpdateRoom={(roomId, updates) => handleUpdateRoom(roomId, updates)}
+                  onDeleteRoom={(roomId) => handleDeleteRoom(roomId)}
+                  onEditPolygon={(roomId) => {
+                    if (selectedRoom.polygonCoordinates && selectedRoom.polygonCoordinates.length >= 3) {
+                      setToolMode('edit-room');
+                    } else {
+                      setDrawingTargetRoomId(roomId);
+                      setToolMode('draw-room');
+                    }
+                  }}
+                  onSelectObject={(objId) => {
+                    setSelectedObjectId(objId);
+                    setSelectedRoomId(null);
+                  }}
+                  isCalibrated={!!floorPlan?.isCalibrated}
+                  onClose={() => setSelectedRoomId(null)}
+                />
+              ) : selectedObject ? (
+                <ObjectInspectorPanel
+                  floorPlan={floorPlan}
+                  selectedObject={selectedObject}
+                  rooms={rooms}
+                  suggestedRoomId={spatialDetections[selectedObject.id]}
+                  onAssignRoom={handleAssignObjectRoom}
+                  onUpdateObject={handleUpdateObject}
+                  onDeleteObject={handleDeleteObject}
+                  onDuplicateObject={handleDuplicateObject}
+                  onBringForward={handleBringForward}
+                  onSendBackward={handleSendBackward}
+                  onBringToFront={handleBringToFront}
+                  onSendToBack={handleSendToBack}
+                  onUpdatePlanConfig={handleUpdatePlanConfig}
+                  onOpenUploadBackground={() => setIsUploadBgOpen(true)}
+                  onDeleteBackground={handleDeleteBackground}
+                  onClose={() => setSelectedObjectId(null)}
+                />
+              ) : null}
+            </aside>
+          )}
+
+          {/* =======================================================================
+              6. FLOATING BOTTOM-RIGHT HUD: ZOOM & VIEW TOGGLES
+              ======================================================================= */}
+          <div className="absolute bottom-6 right-6 z-10 flex items-center gap-1.5 bg-white/95 backdrop-blur-xl p-1.5 rounded-2xl border border-slate-200/90 shadow-xl">
+            <button
+              type="button"
+              onClick={() => setZoomLevel((z) => Math.max(100, z - 15))}
+              disabled={zoomLevel <= 100}
+              className="p-2 rounded-xl text-slate-700 hover:bg-slate-100 hover:text-[#4F6BFF] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              title="Perkecil Zoom"
+            >
+              <ZoomOut className="w-4 h-4" />
+            </button>
+
+            <span className="text-[11px] font-mono font-bold text-slate-700 px-1 min-w-[42px] text-center select-none">
+              {zoomLevel}%
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setZoomLevel((z) => Math.min(400, z + 15))}
+              disabled={zoomLevel >= 400}
+              className="p-2 rounded-xl text-slate-700 hover:bg-slate-100 hover:text-[#4F6BFF] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              title="Perbesar Zoom"
+            >
+              <ZoomIn className="w-4 h-4" />
+            </button>
+
+            <div className="h-4 w-px bg-slate-200 mx-0.5" />
+
+            <button
+              type="button"
+              onClick={() => setZoomLevel(100)}
+              className="p-2 rounded-xl text-slate-700 hover:bg-slate-100 hover:text-[#4F6BFF] transition-colors flex items-center gap-1"
+              title="Pusatkan Denah / Ukuran Pas Frame (100%)"
+            >
+              <Maximize2 className="w-4 h-4" />
+              <span className="text-[10px] font-bold hidden sm:inline">Pusatkan</span>
+            </button>
+
+            {floorPlan?.imagePath && (
+              <>
+                <div className="h-4 w-px bg-slate-200 mx-0.5" />
+                <button
+                  type="button"
+                  onClick={handleRotatePlan}
+                  className="p-2 rounded-xl text-slate-700 hover:bg-slate-100 hover:text-[#4F6BFF] transition-colors flex items-center gap-1"
+                  title="Putar Orientasi Denah 90°"
+                >
+                  <RotateCw className="w-4 h-4 text-[#4F6BFF]" />
+                </button>
+              </>
+            )}
+
+            <div className="h-4 w-px bg-slate-200 mx-0.5" />
+
+            {/* Grid Toggle */}
+            <button
+              type="button"
+              onClick={() => setShowGrid(!showGrid)}
+              className={`p-2 rounded-xl transition-all ${
+                showGrid ? 'bg-indigo-50 text-[#4F6BFF] font-bold' : 'text-slate-400 hover:bg-slate-100'
+              }`}
+              title={showGrid ? 'Sembunyikan Grid' : 'Tampilkan Grid'}
+            >
+              <Grid className="w-4 h-4" />
+            </button>
+
+            {/* Canvas Theme Toggle (Light / Dark) */}
+            <button
+              type="button"
+              onClick={() => setCanvasTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
+              className="p-2 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors"
+              title={canvasTheme === 'light' ? 'Beralih ke Kanvas Gelap' : 'Beralih ke Kanvas Terang'}
+            >
+              {canvasTheme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4 text-amber-500" />}
+            </button>
+          </div>
+
+          {/* =======================================================================
+              7. FLOATING BOTTOM-LEFT PILL: RE-OPEN DASHBOARD & QUICK SUMMARY
+              ======================================================================= */}
+          <div className="absolute bottom-6 left-6 z-10 flex items-center gap-2 pointer-events-auto">
+            {!isPreviewMonitoring && !isLeftPanelOpen && (
+              <button
+                type="button"
+                onClick={() => setIsLeftPanelOpen(true)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white/95 backdrop-blur-xl border border-slate-200/90 text-slate-800 hover:text-[#4F6BFF] hover:bg-blue-50/50 font-bold text-xs shadow-xl transition-all"
+                title="Buka Dashboard IoT Overview"
+              >
+                <SlidersHorizontal className="w-4 h-4 text-[#4F6BFF]" />
+                <span>Buka Dashboard ({devices.length} IoT)</span>
+              </button>
+            )}
+
+            {isLeftPanelOpen && (
+              <div className="hidden 2xl:flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-white/80 backdrop-blur-md border border-slate-200/80 shadow-sm text-xs font-semibold text-slate-600">
+                <span className="font-bold text-slate-800">{activeHouse?.name}</span>
+                <span>•</span>
+                <span>{activeFloor?.name}</span>
+                <span>•</span>
+                <span className="text-[#4F6BFF] font-bold">{devices.length} IoT</span>
+                <span>•</span>
+                <span className="text-emerald-600 font-bold">{rooms.length} Ruangan</span>
+              </div>
+            )}
+          </div>
+        </main>
       </div>
 
       {/* Modals */}
@@ -1663,6 +2611,20 @@ export const FloorPlanWorkspacePage: React.FC = () => {
         onUpload={handleUploadBackground}
         existingImagePath={floorPlan?.imagePath}
         onDelete={handleDeleteBackground}
+      />
+
+      <AutoRoomReferenceModal
+        isOpen={isAutoRoomRefOpen}
+        onClose={() => setIsAutoRoomRefOpen(false)}
+        canvasBounds={{
+          width: floorPlan?.viewBoxWidth || floorPlan?.imageWidth || 1200,
+          height: floorPlan?.viewBoxHeight || floorPlan?.imageHeight || 900,
+          x: floorPlan?.viewBoxX || 0,
+          y: floorPlan?.viewBoxY || 0,
+        }}
+        pixelsPerMeter={floorPlan?.pixelsPerMeter}
+        currentRoomCount={rooms.length}
+        onApply={handleApplyAutoRoomReferences}
       />
 
       <CalibrationModal

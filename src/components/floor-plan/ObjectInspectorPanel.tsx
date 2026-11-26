@@ -18,6 +18,7 @@ import {
   ChevronsUp,
   ChevronsDown,
   Info,
+  X,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -102,11 +103,23 @@ export const ObjectInspectorPanel: React.FC<ObjectInspectorPanelProps> = ({
             {selectedObject ? 'Object Inspector' : 'Floor Plan Overview'}
           </h3>
         </div>
-        {selectedObject && (
-          <Badge variant="purple" className="text-[10px]">
-            {selectedObject.category}
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {selectedObject && (
+            <Badge variant="purple" className="text-[10px]">
+              {selectedObject.category}
+            </Badge>
+          )}
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1 rounded-lg hover:bg-slate-200/60 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+              title="Tutup Panel Objek"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Content */}

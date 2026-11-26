@@ -43,6 +43,7 @@ import {
 } from 'lucide-react';
 import { ToolMode } from './FloorPlanToolbar';
 import { sanitizeSvgInner } from '../../utils/sanitizeSvg';
+import { getFloorPlanImageTransform } from '../../utils/floor-plan-visual';
 
 function computeShoelaceArea(points: PolygonPoint[]): number {
   if (points.length < 3) return 0;
@@ -107,6 +108,10 @@ interface FloorPlanCanvasProps {
   onZoomChange: (level: number) => void;
   isPreviewMonitoring?: boolean;
   showRoomPolygons?: boolean;
+  labelDisplayMode?: 'all' | 'hover' | 'compact' | 'none';
+  canvasTheme?: 'light' | 'dark';
+  categoryFilter?: string;
+  onClearCategoryFilter?: () => void;
 }
 
 type DragMode =
@@ -169,9 +174,50 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   onZoomChange,
   isPreviewMonitoring = false,
   showRoomPolygons = true,
+  labelDisplayMode = 'all',
+  canvasTheme = 'light',
+  categoryFilter = 'Overview',
+  onClearCategoryFilter,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // Helper to test if a device type matches the active category filter
+  const isDeviceMatchingCategory = useCallback((type: string, cat?: string): boolean => {
+    if (!cat || cat === 'Overview') return true;
+    if (cat === 'Engine room') {
+      return [
+        'SMART_LIGHT', 'SMART_DIMMER', 'SMART_AC', 'SMART_LOCK', 'SMART_SWITCH',
+        'SMART_PLUG', 'SMART_CURTAIN', 'LIGHT', 'SWITCH', 'LOCK', 'AC', 'FAN'
+      ].includes(type);
+    }
+    if (cat === 'Internet device') {
+      return [
+        'DOOR_SENSOR', 'SMOKE_DETECTOR', 'GAS_DETECTOR', 'MOTION_SENSOR',
+        'AIR_QUALITY_SENSOR', 'TEMPERATURE_SENSOR', 'WATER_LEAK_SENSOR', 'WATER_LEVEL_SENSOR'
+      ].includes(type) || type.includes('SENSOR');
+    }
+    if (cat === 'Office device') {
+      return [
+        'OUTDOOR_CAMERA', 'INDOOR_CAMERA', 'VIDEO_DOORBELL', 'SMART_DISPLAY_HUB'
+      ].includes(type) || type.includes('CAMERA');
+    }
+    if (cat === 'Other device') {
+      const isControl = [
+        'SMART_LIGHT', 'SMART_DIMMER', 'SMART_AC', 'SMART_LOCK', 'SMART_SWITCH',
+        'SMART_PLUG', 'SMART_CURTAIN', 'LIGHT', 'SWITCH', 'LOCK', 'AC', 'FAN'
+      ].includes(type);
+      const isSensor = [
+        'DOOR_SENSOR', 'SMOKE_DETECTOR', 'GAS_DETECTOR', 'MOTION_SENSOR',
+        'AIR_QUALITY_SENSOR', 'TEMPERATURE_SENSOR', 'WATER_LEAK_SENSOR', 'WATER_LEVEL_SENSOR'
+      ].includes(type) || type.includes('SENSOR');
+      const isVisual = [
+        'OUTDOOR_CAMERA', 'INDOOR_CAMERA', 'VIDEO_DOORBELL', 'SMART_DISPLAY_HUB'
+      ].includes(type) || type.includes('CAMERA');
+      return !isControl && !isSensor && !isVisual;
+    }
+    return true;
+  }, []);
 
   // SVG ViewBox state (World coordinate window)
   const initialWidth = floorPlan.imageWidth || floorPlan.viewBoxWidth || 1600;
@@ -210,7 +256,19 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const [drawPoints, setDrawPoints] = useState<PolygonPoint[]>([]);
   const [drawCursor, setDrawCursor] = useState<PolygonPoint | null>(null);
   const [hoveredRoomId, setHoveredRoomId] = useState<string | null>(null);
+  const [hoveredDeviceId, setHoveredDeviceId] = useState<string | null>(null);
   const [editingVertices, setEditingVertices] = useState<PolygonPoint[] | null>(null);
+
+  // Dynamic Z-Order Elevation: Selected and hovered devices render on the topmost layer
+  const sortedDevices = useMemo(() => {
+    return [...devices].sort((a, b) => {
+      const aSelected = a.id === selectedDeviceId ? 2 : 0;
+      const aHovered = a.id === hoveredDeviceId ? 1 : 0;
+      const bSelected = b.id === selectedDeviceId ? 2 : 0;
+      const bHovered = b.id === hoveredDeviceId ? 1 : 0;
+      return (aSelected + aHovered) - (bSelected + bHovered);
+    });
+  }, [devices, selectedDeviceId, hoveredDeviceId]);
 
   // Scale calibration interaction state
   const [calibPoint1, setCalibPoint1] = useState<PolygonPoint | null>(null);
@@ -371,11 +429,11 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     [viewBox]
   );
 
-  // Zoom to level handler
+  // Zoom to level handler with Fit-to-Frame containment (minZoom = 100%, maxZoom = 400%)
   const handleZoom = useCallback(
     (nextZoom: number, centerScreenX?: number, centerScreenY?: number) => {
       if (!svgRef.current) return;
-      const clampedZoom = Math.max(25, Math.min(400, nextZoom));
+      const clampedZoom = Math.max(100, Math.min(400, nextZoom));
       const rect = svgRef.current.getBoundingClientRect();
 
       const cx = centerScreenX !== undefined ? centerScreenX : rect.left + rect.width / 2;
@@ -391,16 +449,26 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       const factorX = rect.width > 0 ? (cx - rect.left) / rect.width : 0.5;
       const factorY = rect.height > 0 ? (cy - rect.top) / rect.height : 0.5;
 
-      const newX = worldCenterBefore.x - factorX * newW;
-      const newY = worldCenterBefore.y - factorY * newH;
+      const rawX = worldCenterBefore.x - factorX * newW;
+      const rawY = worldCenterBefore.y - factorY * newH;
 
-      setViewBox({ x: newX, y: newY, w: newW, h: newH });
+      // Strict Pan Clamping: Viewport can never move outside the floor plan
+      let clampedX = 0;
+      let clampedY = 0;
+      if (newW < baseW) {
+        clampedX = Math.max(0, Math.min(baseW - newW, rawX));
+      }
+      if (newH < baseH) {
+        clampedY = Math.max(0, Math.min(baseH - newH, rawY));
+      }
+
+      setViewBox({ x: clampedX, y: clampedY, w: newW, h: newH });
       onZoomChange(clampedZoom);
     },
     [floorPlan, screenToWorld, onZoomChange]
   );
 
-  // Auto-reset viewBox whenever switching floor plan
+  // Auto-reset viewBox to Fit-to-Frame whenever switching floor plan or orientation changes
   useEffect(() => {
     const baseW = floorPlan.imageWidth || floorPlan.viewBoxWidth || 1600;
     const baseH = floorPlan.imageHeight || floorPlan.viewBoxHeight || 1000;
@@ -410,21 +478,33 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       w: baseW,
       h: baseH,
     });
-  }, [floorPlan.id]);
+  }, [floorPlan.id, floorPlan.rotation, floorPlan.imageWidth, floorPlan.imageHeight]);
 
-  // Sync external zoomLevel prop
+  // Sync external zoomLevel prop (strictly clamped between 100% and 400%)
   useEffect(() => {
     const baseW = floorPlan.imageWidth || floorPlan.viewBoxWidth || 1600;
     const baseH = floorPlan.imageHeight || floorPlan.viewBoxHeight || 1000;
-    const targetW = baseW * (100 / zoomLevel);
-    const targetH = baseH * (100 / zoomLevel);
+    const clampedZ = Math.max(100, Math.min(400, zoomLevel));
+    const targetW = baseW * (100 / clampedZ);
+    const targetH = baseH * (100 / clampedZ);
 
     if (Math.abs(viewBox.w - targetW) > 1) {
-      setViewBox((prev) => ({
-        ...prev,
-        w: targetW,
-        h: targetH,
-      }));
+      setViewBox((prev) => {
+        let clampedX = 0;
+        let clampedY = 0;
+        if (targetW < baseW) {
+          clampedX = Math.max(0, Math.min(baseW - targetW, prev.x));
+        }
+        if (targetH < baseH) {
+          clampedY = Math.max(0, Math.min(baseH - targetH, prev.y));
+        }
+        return {
+          x: clampedX,
+          y: clampedY,
+          w: targetW,
+          h: targetH,
+        };
+      });
     }
   }, [zoomLevel, floorPlan]);
 
@@ -483,7 +563,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         const t2 = e.touches[1];
         const currentDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
         const scaleDelta = currentDist / pinchStartDist;
-        const nextZoom = Math.max(25, Math.min(400, Math.round(zoomStart * scaleDelta)));
+        const nextZoom = Math.max(100, Math.min(400, Math.round(zoomStart * scaleDelta)));
         handleZoomRef.current(nextZoom);
       }
     };
@@ -553,10 +633,23 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         const dxScreen = clientX - active.startX;
         const dyScreen = clientY - active.startY;
         const scaleFactor = viewBox.w / (svgRef.current?.clientWidth || 1);
+        const rawX = active.startViewBoxX - dxScreen * scaleFactor;
+        const rawY = active.startViewBoxY - dyScreen * scaleFactor;
+
+        // Strict Pan Clamping: Viewport can never move outside the floor plan
+        let clampedX = 0;
+        let clampedY = 0;
+        if (viewBox.w < baseW) {
+          clampedX = Math.max(0, Math.min(baseW - viewBox.w, rawX));
+        }
+        if (viewBox.h < baseH) {
+          clampedY = Math.max(0, Math.min(baseH - viewBox.h, rawY));
+        }
+
         setViewBox((prev) => ({
           ...prev,
-          x: active.startViewBoxX - dxScreen * scaleFactor,
-          y: active.startViewBoxY - dyScreen * scaleFactor,
+          x: clampedX,
+          y: clampedY,
         }));
       } else if (active.type === 'MOVE_OBJECT') {
         let newX = active.origObjX + (world.x - active.startWorldX);
@@ -1001,11 +1094,16 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full bg-[#181F38] overflow-hidden select-none"
+      className={`relative w-full h-full overflow-hidden select-none ${
+        canvasTheme === 'dark' ? 'bg-[#181F38]' : 'bg-[#EEF2F8]'
+      }`}
       style={{
         touchAction: 'none',
         overscrollBehavior: 'none',
-        backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.08) 1.2px, transparent 1.2px)',
+        backgroundImage:
+          canvasTheme === 'dark'
+            ? 'radial-gradient(circle, rgba(255,255,255,0.08) 1.2px, transparent 1.2px)'
+            : 'radial-gradient(circle, #CBD5E1 1.2px, transparent 1.2px)',
         backgroundSize: '24px 24px',
       }}
     >
@@ -1021,6 +1119,29 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
               Klik ikon perangkat untuk mencoba kontrol interaktif
             </span>
           </div>
+        </div>
+      )}
+
+      {/* ACTIVE CATEGORY FILTER FOCUS CHIP (When user clicks header category tab) */}
+      {!isPreviewMonitoring && categoryFilter && categoryFilter !== 'Overview' && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/95 backdrop-blur-md border border-[#4F6BFF]/40 shadow-lg shadow-indigo-500/10 text-xs animate-in fade-in slide-in-from-top-1 pointer-events-auto">
+          <span className="w-2 h-2 rounded-full bg-[#4F6BFF] animate-pulse" />
+          <span className="font-bold text-slate-800">
+            Fokus: <span className="text-[#4F6BFF] font-black">{categoryFilter}</span>
+          </span>
+          <span className="text-slate-500 font-mono text-[11px]">
+            ({devices.filter((d) => isDeviceMatchingCategory(d.type, categoryFilter)).length} perangkat aktif)
+          </span>
+          {onClearCategoryFilter && (
+            <button
+              type="button"
+              onClick={onClearCategoryFilter}
+              className="ml-1 p-0.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+              title="Reset ke Overview (Tampilkan Semua Perangkat)"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       )}
 
@@ -1204,22 +1325,29 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           />
         )}
 
-        {/* 2. Uploaded Floor Plan Image */}
-        {floorPlan.imagePath && floorPlan.isBackgroundVisible && !imageError && backgroundImageUrl && (
-          <g>
-            <image
-              href={backgroundImageUrl}
-              x="0"
-              y="0"
-              width={floorPlan.imageWidth || 1600}
-              height={floorPlan.imageHeight || 1000}
-              opacity={floorPlan.backgroundOpacity ?? 1}
-              preserveAspectRatio="none"
-              onError={() => setImageError(true)}
-              onLoad={() => setImageLoaded(true)}
-            />
-          </g>
-        )}
+        {/* 2. Uploaded Floor Plan Image with dynamic rotation transform */}
+        {floorPlan.imagePath && floorPlan.isBackgroundVisible && !imageError && backgroundImageUrl && (() => {
+          const imgT = getFloorPlanImageTransform(
+            floorPlan.rotation || 0,
+            floorPlan.imageWidth || 1600,
+            floorPlan.imageHeight || 1000
+          );
+          return (
+            <g transform={imgT.transform || undefined}>
+              <image
+                href={backgroundImageUrl}
+                x="0"
+                y="0"
+                width={imgT.renderWidth}
+                height={imgT.renderHeight}
+                opacity={floorPlan.backgroundOpacity ?? 1}
+                preserveAspectRatio="none"
+                onError={() => setImageError(true)}
+                onLoad={() => setImageLoaded(true)}
+              />
+            </g>
+          );
+        })()}
 
         {/* 3. Room Polygons Layer (Hidden by default to prevent user distraction) */}
         {showRoomPolygons && (
@@ -1404,21 +1532,67 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
         {/* 5. IOT DEVICES LAYER (Interactive Monitoring & Placement Markers) */}
         <g id="iot-devices-layer">
-          {devices.map((dev) => {
+          {sortedDevices.map((dev) => {
             const isSelected = dev.id === selectedDeviceId;
+            const isHovered = dev.id === hoveredDeviceId;
             const theme = getDeviceVisualTheme(dev);
+            const cfg = (dev.configuration as Record<string, any>) || {};
+            const labelPos = cfg.labelPosition || 'bottom';
 
             // Visual sizing: iconWidth / iconHeight or fallback to 48px
             const size = dev.iconWidth || 48;
             const R = size / 2; // Outer radius
             const hitRadius = Math.max(24, R + 8); // Minimum 48px hit diameter
 
+            // Label display density logic
+            const showLabel =
+              labelPos !== 'hidden' &&
+              (labelDisplayMode === 'all'
+                ? true
+                : labelDisplayMode === 'hover'
+                ? isSelected || isHovered
+                : isSelected);
+
+            // Compute label transform based on orientation
+            let labelTransform = `translate(0, ${R + 10})`;
+            if (labelPos === 'top') {
+              labelTransform = `translate(0, ${-R - 44})`;
+            } else if (labelPos === 'left') {
+              labelTransform = `translate(${-R - 70}, -10)`;
+            } else if (labelPos === 'right') {
+              labelTransform = `translate(${R + 70}, -10)`;
+            }
+
+            const isMatchingCat = isDeviceMatchingCategory(dev.type, categoryFilter);
+            const isCategoryActive = categoryFilter && categoryFilter !== 'Overview';
+            const isDimmedByFilter = isCategoryActive && !isMatchingCat;
+
             return (
               <g
                 key={dev.id}
                 transform={`translate(${dev.x}, ${dev.y})`}
+                opacity={isDimmedByFilter ? 0.22 : 1}
+                style={{
+                  filter: isDimmedByFilter ? 'grayscale(80%)' : 'none',
+                  transition: 'opacity 0.25s ease, filter 0.25s ease',
+                }}
                 className="select-none"
               >
+                {/* CATEGORY SPOTLIGHT FOCUS RING */}
+                {isCategoryActive && isMatchingCat && (
+                  <circle
+                    cx="0"
+                    cy="0"
+                    r={R + 7}
+                    fill="none"
+                    stroke="#4F6BFF"
+                    strokeWidth="2.5"
+                    strokeDasharray="4 3"
+                    className="animate-pulse"
+                    opacity="0.9"
+                  />
+                )}
+
                 {/* 1. AMBIENT ILLUMINATION HALO ON FLOOR PLAN (Only for illuminated/active devices) */}
                 {theme.hasAmbientHalo && (
                   <circle
@@ -1438,6 +1612,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                   fill="transparent"
                   pointerEvents="all"
                   className={isPreviewMonitoring ? 'cursor-pointer' : 'cursor-move'}
+                  onMouseEnter={() => setHoveredDeviceId(dev.id)}
+                  onMouseLeave={() => setHoveredDeviceId((prev) => (prev === dev.id ? null : prev))}
                   onMouseDown={(e) => handleDeviceMouseDown(e, dev)}
                 />
 
@@ -1454,6 +1630,21 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                     strokeWidth="2"
                     strokeDasharray="4 3"
                     pointerEvents="none"
+                  />
+                )}
+
+                {/* Hover ring indicator */}
+                {isHovered && !isSelected && (
+                  <circle
+                    cx="0"
+                    cy="0"
+                    r={R + 5}
+                    fill="none"
+                    stroke="#8B5CF6"
+                    strokeWidth="1.5"
+                    strokeDasharray="2 2"
+                    pointerEvents="none"
+                    opacity="0.8"
                   />
                 )}
 
@@ -1497,60 +1688,62 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                   </svg>
                 </g>
 
-                {/* Device Name & Status Tag Below Marker */}
-                <g transform={`translate(0, ${R + 10})`} pointerEvents="none">
-                  {/* Name pill background */}
-                  <rect
-                    x="-60"
-                    y="0"
-                    width="120"
-                    height="19"
-                    rx="9.5"
-                    fill="rgba(15, 23, 42, 0.92)"
-                    stroke={theme.isActive ? `${theme.primaryColor}55` : 'rgba(255, 255, 255, 0.15)'}
-                    strokeWidth="1"
-                  />
-                  <text
-                    x="0"
-                    y="13"
-                    textAnchor="middle"
-                    fill="#F8FAFC"
-                    fontSize="9.5"
-                    fontWeight="bold"
-                    className="select-none"
-                  >
-                    {dev.name.length > 15 ? `${dev.name.slice(0, 14)}…` : dev.name}
-                  </text>
-
-                  {/* Status Indicator Pill with vibrant state color */}
-                  <g transform="translate(0, 22)">
+                {/* Device Name & Status Tag (Configurable orientation & smart clean hover) */}
+                {showLabel && (
+                  <g transform={labelTransform} pointerEvents="none" className="transition-all duration-200">
+                    {/* Name pill background */}
                     <rect
-                      x="-50"
+                      x="-60"
                       y="0"
-                      width="100"
-                      height="17"
-                      rx="8.5"
-                      fill={theme.pinBgColor}
-                      stroke={theme.primaryColor}
-                      strokeWidth={theme.isActive ? 1.5 : 1}
-                      opacity={theme.isActive ? 1.0 : 0.8}
+                      width="120"
+                      height="19"
+                      rx="9.5"
+                      fill="rgba(15, 23, 42, 0.92)"
+                      stroke={theme.isActive ? `${theme.primaryColor}55` : 'rgba(255, 255, 255, 0.15)'}
+                      strokeWidth="1"
                     />
-                    {/* Status dot */}
-                    <circle cx="-36" cy="8.5" r="3" fill={theme.primaryColor} />
                     <text
-                      x="4"
-                      y="12"
+                      x="0"
+                      y="13"
                       textAnchor="middle"
-                      fill={theme.primaryColor}
-                      fontSize="8.5"
+                      fill="#F8FAFC"
+                      fontSize="9.5"
                       fontWeight="bold"
-                      fontFamily="system-ui, -apple-system, sans-serif"
                       className="select-none"
                     >
-                      {theme.statusText}
+                      {dev.name.length > 15 ? `${dev.name.slice(0, 14)}…` : dev.name}
                     </text>
+
+                    {/* Status Indicator Pill with vibrant state color */}
+                    <g transform="translate(0, 22)">
+                      <rect
+                        x="-50"
+                        y="0"
+                        width="100"
+                        height="17"
+                        rx="8.5"
+                        fill={theme.pinBgColor}
+                        stroke={theme.primaryColor}
+                        strokeWidth={theme.isActive ? 1.5 : 1}
+                        opacity={theme.isActive ? 1.0 : 0.8}
+                      />
+                      {/* Status dot */}
+                      <circle cx="-36" cy="8.5" r="3" fill={theme.primaryColor} />
+                      <text
+                        x="4"
+                        y="12"
+                        textAnchor="middle"
+                        fill={theme.primaryColor}
+                        fontSize="8.5"
+                        fontWeight="bold"
+                        fontFamily="system-ui, -apple-system, sans-serif"
+                        className="select-none"
+                      >
+                        {theme.statusText}
+                      </text>
+                    </g>
                   </g>
-                </g>
+                )}
 
                 {/* RESIZE HANDLES (Visible ONLY when selected in Configuration Mode) */}
                 {isSelected && !isPreviewMonitoring && (

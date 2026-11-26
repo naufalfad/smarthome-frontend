@@ -28,6 +28,7 @@ export interface Room {
   color: string | null;
   polygonCoordinates: PolygonPoint[] | null;
   areaSquareMeters: number | null;
+  ceilingHeight?: number;
   isActive: boolean;
   floor?: number;
   floorPlanObjects?: FloorPlanObject[];
@@ -46,6 +47,12 @@ export interface ObjectCatalogItem {
   defaultHeight: number;
   description?: string | null;
   isActive: boolean;
+  modelGlbPath?: string | null;
+  placementTarget?: 'FLOOR' | 'WALL' | 'TABLETOP' | string;
+  defaultElevation?: number;
+  dimensionLength?: number;
+  dimensionWidth?: number;
+  dimensionHeight?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -95,6 +102,7 @@ export interface FloorPlan {
   backgroundOpacity: number;
   isBackgroundVisible: boolean;
   gridSnap?: boolean;
+  rotation?: number;
   objects: FloorPlanObject[];
   floor?: Floor;
   createdAt: string;

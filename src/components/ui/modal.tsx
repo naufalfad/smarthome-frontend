@@ -9,7 +9,18 @@ export interface ModalProps {
   description?: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '4xl';
+  className?: string;
 }
+
+const sizeClasses: Record<NonNullable<ModalProps['size']>, string> = {
+  sm: 'max-w-sm',
+  md: 'max-w-md',
+  lg: 'max-w-lg',
+  xl: 'max-w-xl',
+  '2xl': 'max-w-2xl',
+  '4xl': 'max-w-4xl',
+};
 
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
@@ -18,6 +29,8 @@ export const Modal: React.FC<ModalProps> = ({
   description,
   children,
   footer,
+  size = 'lg',
+  className = '',
 }) => {
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -44,7 +57,7 @@ export const Modal: React.FC<ModalProps> = ({
       />
 
       {/* Modal Dialog Box */}
-      <div className="relative w-full max-w-lg rounded-3xl border border-slate-100 bg-white shadow-2xl shadow-slate-900/10 z-10 overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200">
+      <div className={`relative w-full ${sizeClasses[size] || 'max-w-lg'} rounded-3xl border border-slate-100 bg-white shadow-2xl shadow-slate-900/10 z-10 overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200 ${className}`}>
         <div className="flex items-center justify-between p-6 border-b border-slate-100">
           <div>
             <h3 className="text-base font-bold text-[#181829]">{title}</h3>

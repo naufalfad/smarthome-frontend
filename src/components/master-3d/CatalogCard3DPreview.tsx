@@ -12,7 +12,7 @@ import {
   Eye,
 } from 'lucide-react';
 import { Model3DCanvasPreview } from './Model3DCanvasPreview';
-import { sanitizeSvgInner } from '../../utils/sanitizeSvg';
+import { sanitizeSvg } from '../../utils/sanitizeSvg';
 
 interface CatalogCard3DPreviewProps {
   id: string;
@@ -139,8 +139,8 @@ export const CatalogCard3DPreview: React.FC<CatalogCard3DPreviewProps> = ({
               style={{ backgroundColor: color || '#8B5CF6' }}
             />
             <div
-              className="relative w-16 h-16 [&>svg]:w-full [&>svg]:h-full [&>svg]:drop-shadow-md group-hover:scale-105 transition-transform"
-              dangerouslySetInnerHTML={{ __html: sanitizeSvgInner(svgContent) }}
+              className="relative w-16 h-16 [&>svg]:w-full [&>svg]:h-full [&>svg]:drop-shadow-md group-hover:scale-105 transition-transform flex items-center justify-center text-slate-300"
+              dangerouslySetInnerHTML={{ __html: sanitizeSvg(svgContent) }}
             />
           </div>
         ) : (

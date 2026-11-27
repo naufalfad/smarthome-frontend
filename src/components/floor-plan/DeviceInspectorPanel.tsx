@@ -52,6 +52,7 @@ export const DeviceInspectorPanel: React.FC<DeviceInspectorPanelProps> = ({
   const [name, setName] = useState('');
   const [manualRoomName, setManualRoomName] = useState('');
   const [iconSize, setIconSize] = useState<number>(48);
+  const [rotation, setRotation] = useState<number>(0);
   const [integrationStatus, setIntegrationStatus] = useState<string>('UNCONFIGURED');
   const [status, setStatus] = useState<string>('OFFLINE');
   const [capabilities, setCapabilities] = useState<DeviceCapability[]>([]);
@@ -68,6 +69,7 @@ export const DeviceInspectorPanel: React.FC<DeviceInspectorPanelProps> = ({
         setName(device.name || '');
         setManualRoomName(device.manualRoomName || '');
         setIconSize(device.iconWidth || 48);
+        setRotation(device.rotation || 0);
       }
       setIntegrationStatus(device.integrationStatus || 'UNCONFIGURED');
       setStatus(device.status || 'OFFLINE');
@@ -345,6 +347,101 @@ export const DeviceInspectorPanel: React.FC<DeviceInspectorPanelProps> = ({
                 </button>
               );
             })}
+          </div>
+        </div>
+
+        {/* Spatial Orientation & Rotation (0° - 360°) */}
+        <div className="space-y-2 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+          <div className="flex items-center justify-between text-xs font-bold text-[#181829]">
+            <div className="flex items-center gap-1.5">
+              <RotateCw className="w-3.5 h-3.5 text-purple-600" />
+              <span>Rotasi & Arah Hadap (3D & 2D)</span>
+            </div>
+            <span className="text-[11px] font-mono font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-md">
+              {Math.round(rotation)}°
+            </span>
+          </div>
+
+          <p className="text-[11px] text-[#71758E]">
+            Arah hadap unit (cth. hembusan angin AC, sorotan lensa CCTV, arah gagang kunci pintu).
+          </p>
+
+          <input
+            type="range"
+            min={0}
+            max={360}
+            step={5}
+            value={rotation}
+            onChange={(e) => {
+              const val = Number(e.target.value);
+              setRotation(val);
+              handleSave({ rotation: val });
+            }}
+            className="w-full accent-purple-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+          />
+
+          <div className="grid grid-cols-4 gap-1 pt-1">
+            {[
+              { label: '0° Atas', val: 0 },
+              { label: '90° Kanan', val: 90 },
+              { label: '180° Bawah', val: 180 },
+              { label: '270° Kiri', val: 270 },
+            ].map((deg) => (
+              <button
+                key={deg.val}
+                type="button"
+                onClick={() => {
+                  setRotation(deg.val);
+                  handleSave({ rotation: deg.val });
+                }}
+                className={`py-1 px-1 rounded-lg text-[10px] font-bold transition-all text-center ${
+                  rotation === deg.val
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {deg.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Spatial Elevation (Height from floor in 3D) */}
+        <div className="space-y-2 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+          <div className="flex items-center justify-between text-xs font-bold text-[#181829]">
+            <div className="flex items-center gap-1.5">
+              <Compass className="w-3.5 h-3.5 text-purple-600" />
+              <span>Ketinggian Pemasangan (3D Twin)</span>
+            </div>
+            <span className="text-[11px] font-mono font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-md">
+              {config.elevation !== undefined ? `${Number(config.elevation).toFixed(2)}m` : 'Default'}
+            </span>
+          </div>
+
+          <p className="text-[11px] text-[#71758E]">
+            Ketinggian fisik penempatan unit dari permukaan lantai (elevasi sumbu Y).
+          </p>
+
+          <div className="grid grid-cols-4 gap-1 pt-1">
+            {[
+              { label: 'Plafon (2.9m)', h: 2.9 },
+              { label: 'Atas (2.1m)', h: 2.1 },
+              { label: 'Saklar (1.2m)', h: 1.2 },
+              { label: 'Pintu (1.0m)', h: 1.0 },
+            ].map((pres) => (
+              <button
+                key={pres.h}
+                type="button"
+                onClick={() => handleUpdateConfigProperty('elevation', pres.h)}
+                className={`py-1 px-1 rounded-lg text-[10px] font-bold transition-all text-center ${
+                  config.elevation === pres.h
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {pres.label}
+              </button>
+            ))}
           </div>
         </div>
 

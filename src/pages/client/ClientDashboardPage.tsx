@@ -8,6 +8,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Home,
+  Box,
   Layers,
   DoorClosed,
   Zap,
@@ -73,6 +74,7 @@ import { DeviceControlModal } from '../../components/floor-plan/DeviceControlMod
 import { AutomationRuleModal } from '../../components/automation/AutomationRuleModal';
 import { Button } from '../../components/ui/button';
 import { DeviceSvgIcon, getDeviceVisualTheme } from '../../utils/device-visual';
+import { ProceduralDollhouseViewer } from '../../components/viewer/ProceduralDollhouseViewer';
 
 export interface ClientDashboardPageProps {
   initialHouseId?: string;
@@ -91,6 +93,8 @@ export const ClientDashboardPage: React.FC<ClientDashboardPageProps> = ({ initia
 
   // Navigation Tab State - Default to frameless 2D floor plan
   const [activeTab, setActiveTab] = useState<'overview' | 'floorplan' | 'rooms' | 'automation' | 'activity'>('floorplan');
+  // Viewport Dimension State: 2D Studio Plan vs 3D Procedural Dollhouse
+  const [viewDimension, setViewDimension] = useState<'2D' | '3D'>('2D');
 
   // Dedicated Customer Monitoring Modules inside Floor Plan View:
   // 'summary' | 'devices' | 'rooms' | 'cctv' | 'security' | 'automation' | 'energy' | null
@@ -116,6 +120,7 @@ export const ClientDashboardPage: React.FC<ClientDashboardPageProps> = ({ initia
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<IoTDevice | null>(null);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [availableHouses, setAvailableHouses] = useState<House[]>([]);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
@@ -176,6 +181,11 @@ export const ClientDashboardPage: React.FC<ClientDashboardPageProps> = ({ initia
     if (devices.length === 0) return 0;
     return Math.round((alertOrOfflineCount / devices.length) * 100);
   }, [devices, alertOrOfflineCount]);
+
+  // Active Floor and Floor Plan
+  const currentFloor = useMemo(() => {
+    return floors.find((f) => f.id === activeFloorId) || floors[0] || null;
+  }, [floors, activeFloorId]);
 
   // Active Floor Devices
   const floorDevices = useMemo(() => {
@@ -885,6 +895,42 @@ export const ClientDashboardPage: React.FC<ClientDashboardPageProps> = ({ initia
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               <span className="hidden md:inline">{house.publishStatus || 'Aktif'}</span>
             </span>
+
+            {/* Viewport Dimension Switcher: 2D Studio vs 3D Dollhouse */}
+            <div className="flex items-center p-0.5 rounded-xl bg-slate-100/90 border border-slate-200/80 shadow-2xs shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setViewDimension('2D');
+                  if (activeTab !== 'floorplan') setActiveTab('floorplan');
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  viewDimension === '2D' && activeTab === 'floorplan'
+                    ? 'bg-white text-purple-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Tampilan Denah 2D Interaktif"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">2D Denah</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setViewDimension('3D');
+                  if (activeTab !== 'floorplan') setActiveTab('floorplan');
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  viewDimension === '3D' && activeTab === 'floorplan'
+                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Tampilan 3D Dollhouse Digital Twin"
+              >
+                <Box className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">3D Dollhouse</span>
+              </button>
+            </div>
           </div>
 
           {/* 2. Center Group: Category Filter (5 Segmented Pills on 2xl+, Dropdown on smaller/inspect) */}
@@ -1018,18 +1064,37 @@ export const ClientDashboardPage: React.FC<ClientDashboardPageProps> = ({ initia
             ========================================================================= */}
         {activeTab === 'floorplan' ? (
           <main className="flex-1 w-full h-full relative overflow-hidden bg-[#EEF2F8]">
-            <InteractiveFloorPlanSection
-              floors={floors}
-              activeFloorId={activeFloorId}
-              onSelectFloor={setActiveFloorId}
-              devices={devices}
-              rooms={rooms}
-              onSelectDevice={(dev) => setSelectedDevice(dev)}
-              categoryFilter={selectedCategoryTab}
-              onClearCategoryFilter={() => setSelectedCategoryTab('Overview')}
-              isDeviceDrawerOpen={isDeviceDrawerOpen}
-              onToggleDeviceDrawer={setIsDeviceDrawerOpen}
-            />
+            {viewDimension === '2D' ? (
+              <InteractiveFloorPlanSection
+                floors={floors}
+                activeFloorId={activeFloorId}
+                onSelectFloor={setActiveFloorId}
+                devices={devices}
+                rooms={rooms}
+                onSelectDevice={(dev) => setSelectedDevice(dev)}
+                categoryFilter={selectedCategoryTab}
+                onClearCategoryFilter={() => setSelectedCategoryTab('Overview')}
+                isDeviceDrawerOpen={isDeviceDrawerOpen}
+                onToggleDeviceDrawer={setIsDeviceDrawerOpen}
+              />
+            ) : (
+              <ProceduralDollhouseViewer
+                floorPlan={currentFloor?.floorPlan}
+                rooms={rooms.filter((r) => !r.floorId || r.floorId === activeFloorId)}
+                devices={floorDevices}
+                furniture={currentFloor?.floorPlan?.objects || []}
+                selectedDeviceId={selectedDevice?.id}
+                selectedRoomId={selectedRoomId}
+                onSelectDevice={(dev) => setSelectedDevice(dev)}
+                onOpenDeviceControl={(dev) => setSelectedDevice(dev)}
+                onSelectRoom={(roomId) => setSelectedRoomId(roomId)}
+                defaultWallMode="cutaway"
+                floors={floors}
+                activeFloorId={activeFloorId}
+                onSelectFloor={setActiveFloorId}
+                className="w-full h-full min-h-[calc(100vh-80px)]"
+              />
+            )}
 
             {/* =====================================================================
                 4. FLOATING LEFT PANEL: DEDICATED CUSTOMER MONITORING MODULES

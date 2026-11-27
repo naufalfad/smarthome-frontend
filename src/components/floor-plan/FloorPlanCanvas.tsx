@@ -16,6 +16,7 @@ import {
   getDeviceHaloGradientUrl,
   DeviceSvgIcon,
 } from '../../utils/device-visual';
+import { getPolygonVisualCenter } from '../../utils/polygon-label';
 import {
   Compass,
   PenTool,
@@ -40,10 +41,31 @@ import {
   Upload,
   Undo2,
   X,
+  Square,
+  Copy,
 } from 'lucide-react';
 import { ToolMode } from './FloorPlanToolbar';
 import { sanitizeSvgInner } from '../../utils/sanitizeSvg';
 import { getFloorPlanImageTransform } from '../../utils/floor-plan-visual';
+import { checkPolygonSelfIntersection } from '../../utils/floor-plan-image-detector';
+
+function untanglePolygon(points: PolygonPoint[]): PolygonPoint[] {
+  if (points.length < 3) return points;
+  let cx = 0;
+  let cy = 0;
+  for (const p of points) {
+    cx += p.x;
+    cy += p.y;
+  }
+  cx /= points.length;
+  cy /= points.length;
+
+  return points.slice().sort((a, b) => {
+    const angleA = Math.atan2(a.y - cy, a.x - cx);
+    const angleB = Math.atan2(b.y - cy, b.x - cx);
+    return angleA - angleB;
+  });
+}
 
 function computeShoelaceArea(points: PolygonPoint[]): number {
   if (points.length < 3) return 0;
@@ -141,7 +163,8 @@ type DragMode =
     }
   | { type: 'ROTATE_OBJECT'; objectId: string; centerX: number; centerY: number }
   | { type: 'RESIZE_OBJECT'; objectId: string; handle: 'se' | 'sw' | 'ne' | 'nw'; startWorldX: number; startWorldY: number; origX: number; origY: number; origW: number; origH: number }
-  | { type: 'MOVE_VERTEX'; roomId: string; vertexIndex: number; startWorldX: number; startWorldY: number; origVertexX: number; origVertexY: number };
+  | { type: 'MOVE_VERTEX'; roomId: string; vertexIndex: number; startWorldX: number; startWorldY: number; origVertexX: number; origVertexY: number }
+  | { type: 'MOVE_ROOM'; roomId: string; startWorldX: number; startWorldY: number; origVertices: PolygonPoint[] };
 
 export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   floorPlan,
@@ -252,12 +275,52 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const dragRef = useRef<DragMode>({ type: 'NONE' });
   const [dragMode, setDragMode] = useState<DragMode>({ type: 'NONE' });
 
-  // Drawing room polygon state
+  // Drawing room polygon & rectangle state
+  const [drawShapeMode, setDrawShapeMode] = useState<'RECTANGLE' | 'POLYGON'>('RECTANGLE');
+  const [rectStartPoint, setRectStartPoint] = useState<PolygonPoint | null>(null);
+  const [rectCurrentPoint, setRectCurrentPoint] = useState<PolygonPoint | null>(null);
+  const [isDraggingRect, setIsDraggingRect] = useState<boolean>(false);
+  const [magneticSnapPoint, setMagneticSnapPoint] = useState<PolygonPoint | null>(null);
+
   const [drawPoints, setDrawPoints] = useState<PolygonPoint[]>([]);
   const [drawCursor, setDrawCursor] = useState<PolygonPoint | null>(null);
   const [hoveredRoomId, setHoveredRoomId] = useState<string | null>(null);
   const [hoveredDeviceId, setHoveredDeviceId] = useState<string | null>(null);
   const [editingVertices, setEditingVertices] = useState<PolygonPoint[] | null>(null);
+
+  // Collect all corners of existing rooms for Magnetic CAD Snapping
+  const allRoomCorners = useMemo(() => {
+    const pts: PolygonPoint[] = [];
+    rooms.forEach((r) => {
+      if (r.polygonCoordinates && Array.isArray(r.polygonCoordinates)) {
+        r.polygonCoordinates.forEach((p) => {
+          if (p && typeof p.x === 'number' && typeof p.y === 'number') {
+            pts.push(p);
+          }
+        });
+      }
+    });
+    return pts;
+  }, [rooms]);
+
+  const getSnappedPoint = useCallback(
+    (rawPoint: PolygonPoint, radius = 20): { pt: PolygonPoint; isSnapped: boolean } => {
+      let closest: PolygonPoint | null = null;
+      let minDist = radius;
+      for (const c of allRoomCorners) {
+        const d = Math.hypot(c.x - rawPoint.x, c.y - rawPoint.y);
+        if (d < minDist) {
+          minDist = d;
+          closest = c;
+        }
+      }
+      if (closest) {
+        return { pt: { x: closest.x, y: closest.y }, isSnapped: true };
+      }
+      return { pt: rawPoint, isSnapped: false };
+    },
+    [allRoomCorners]
+  );
 
   // Dynamic Z-Order Elevation: Selected and hovered devices render on the topmost layer
   const sortedDevices = useMemo(() => {
@@ -289,6 +352,10 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const handleCancelDrawRoom = useCallback(() => {
     setDrawPoints([]);
     setDrawCursor(null);
+    setRectStartPoint(null);
+    setRectCurrentPoint(null);
+    setIsDraggingRect(false);
+    setMagneticSnapPoint(null);
     if (onExitToolMode) onExitToolMode();
   }, [onExitToolMode]);
 
@@ -427,6 +494,41 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       };
     },
     [viewBox]
+  );
+
+  // CAD Helper: Split Wall Edge (Insert Vertex at midpoint or click location)
+  const handleSplitEdge = useCallback(
+    (edgeIndex: number, newPoint: PolygonPoint, startDragEvent?: React.MouseEvent) => {
+      if (!editingVertices || !selectedRoomId) return;
+      const newVertexIndex = edgeIndex + 1;
+      const cleanPoint = {
+        x: Math.round(newPoint.x * 10) / 10,
+        y: Math.round(newPoint.y * 10) / 10,
+      };
+      const next = [...editingVertices];
+      next.splice(newVertexIndex, 0, cleanPoint);
+      setEditingVertices(next);
+      if (onUpdateRoomPolygonRef.current) {
+        onUpdateRoomPolygonRef.current(selectedRoomId, next);
+      }
+
+      // If mouse event was passed (user pressed down), start dragging the new vertex immediately
+      if (startDragEvent) {
+        const world = screenToWorld(startDragEvent.clientX, startDragEvent.clientY);
+        const moveVertexAction: DragMode = {
+          type: 'MOVE_VERTEX',
+          roomId: selectedRoomId,
+          vertexIndex: newVertexIndex,
+          startWorldX: world.x,
+          startWorldY: world.y,
+          origVertexX: cleanPoint.x,
+          origVertexY: cleanPoint.y,
+        };
+        dragRef.current = moveVertexAction;
+        setDragMode(moveVertexAction);
+      }
+    },
+    [editingVertices, selectedRoomId, screenToWorld]
   );
 
   // Zoom to level handler with Fit-to-Frame containment (minZoom = 100%, maxZoom = 400%)
@@ -615,10 +717,69 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     if (active.type === 'MOVE_VERTEX' && active.roomId) {
       setEditingVertices((current) => {
         if (current && current.length >= 3 && onUpdateRoomPolygonRef.current) {
+          let safeVertices = current;
+          // Check self-intersection and attempt auto-repair
+          if (checkPolygonSelfIntersection(current)) {
+            const untangled = untanglePolygon(current);
+            if (!checkPolygonSelfIntersection(untangled)) {
+              safeVertices = untangled;
+            } else {
+              // Revert dragged vertex to original to prevent corruption
+              safeVertices = current.map((p, i) =>
+                i === active.vertexIndex ? { x: active.origVertexX, y: active.origVertexY } : p
+              );
+            }
+          }
+          onUpdateRoomPolygonRef.current(active.roomId, safeVertices);
+          return safeVertices;
+        }
+        return current;
+      });
+    }
+
+    // 4. Commit Entire Moved Room
+    if (active.type === 'MOVE_ROOM' && active.roomId) {
+      setEditingVertices((current) => {
+        if (current && current.length >= 3 && onUpdateRoomPolygonRef.current) {
           onUpdateRoomPolygonRef.current(active.roomId, current);
         }
         return current;
       });
+    }
+
+    // 5. Commit Rectangle Drag Room
+    if (
+      toolMode === 'draw-room' &&
+      drawShapeMode === 'RECTANGLE' &&
+      isDraggingRect &&
+      rectStartPoint &&
+      rectCurrentPoint
+    ) {
+      const minX = Math.min(rectStartPoint.x, rectCurrentPoint.x);
+      const maxX = Math.max(rectStartPoint.x, rectCurrentPoint.x);
+      const minY = Math.min(rectStartPoint.y, rectCurrentPoint.y);
+      const maxY = Math.max(rectStartPoint.y, rectCurrentPoint.y);
+      const w = maxX - minX;
+      const h = maxY - minY;
+
+      if (w >= 25 && h >= 25) {
+        const rectPolygon: PolygonPoint[] = [
+          { x: minX, y: minY },
+          { x: maxX, y: minY },
+          { x: maxX, y: maxY },
+          { x: minX, y: maxY },
+        ];
+        if (onFinishDrawRoom) {
+          onFinishDrawRoom(rectPolygon);
+        }
+        setRectStartPoint(null);
+        setRectCurrentPoint(null);
+        setIsDraggingRect(false);
+        setMagneticSnapPoint(null);
+      } else {
+        // Keep as first corner clicked for 2-click interaction
+        setIsDraggingRect(false);
+      }
     }
   }, [floorPlan]);
 
@@ -747,6 +908,25 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             height: newH,
           });
         }
+      } else if (active.type === 'MOVE_ROOM') {
+        const dx = world.x - active.startWorldX;
+        const dy = world.y - active.startWorldY;
+        const step = (floorPlan.isCalibrated && floorPlan.pixelsPerMeter)
+          ? floorPlan.pixelsPerMeter / 2
+          : 20;
+
+        let finalDx = dx;
+        let finalDy = dy;
+        if (snapToGrid) {
+          finalDx = Math.round(dx / step) * step;
+          finalDy = Math.round(dy / step) * step;
+        }
+
+        const shifted = active.origVertices.map((p) => ({
+          x: Math.round((p.x + finalDx) * 10) / 10,
+          y: Math.round((p.y + finalDy) * 10) / 10,
+        }));
+        setEditingVertices(shifted);
       } else if (active.type === 'MOVE_VERTEX') {
         const step = (floorPlan.isCalibrated && floorPlan.pixelsPerMeter)
           ? floorPlan.pixelsPerMeter / 2
@@ -869,12 +1049,48 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       return;
     }
 
-    // Mode: Draw Room Polygon
+    // Mode: Draw Room Polygon / Rectangle
     if (toolMode === 'draw-room') {
       const step = (floorPlan.isCalibrated && floorPlan.pixelsPerMeter) ? floorPlan.pixelsPerMeter / 2 : 20;
-      let ptX = snapToGrid ? Math.round(world.x / step) * step : Math.round(world.x * 10) / 10;
-      let ptY = snapToGrid ? Math.round(world.y / step) * step : Math.round(world.y * 10) / 10;
+      let rawPtX = snapToGrid ? Math.round(world.x / step) * step : Math.round(world.x * 10) / 10;
+      let rawPtY = snapToGrid ? Math.round(world.y / step) * step : Math.round(world.y * 10) / 10;
+      const { pt: snappedPt } = getSnappedPoint({ x: rawPtX, y: rawPtY });
+      const ptX = snappedPt.x;
+      const ptY = snappedPt.y;
 
+      if (drawShapeMode === 'RECTANGLE') {
+        if (!rectStartPoint) {
+          // Point 1 (Start dragging or first corner)
+          setRectStartPoint({ x: ptX, y: ptY });
+          setRectCurrentPoint({ x: ptX, y: ptY });
+          setIsDraggingRect(true);
+        } else {
+          // Point 2 (Click to finish)
+          const minX = Math.min(rectStartPoint.x, ptX);
+          const maxX = Math.max(rectStartPoint.x, ptX);
+          const minY = Math.min(rectStartPoint.y, ptY);
+          const maxY = Math.max(rectStartPoint.y, ptY);
+          const w = maxX - minX;
+          const h = maxY - minY;
+
+          if (w >= 20 && h >= 20 && onFinishDrawRoom) {
+            const rectPolygon: PolygonPoint[] = [
+              { x: minX, y: minY },
+              { x: maxX, y: minY },
+              { x: maxX, y: maxY },
+              { x: minX, y: maxY },
+            ];
+            onFinishDrawRoom(rectPolygon);
+          }
+          setRectStartPoint(null);
+          setRectCurrentPoint(null);
+          setIsDraggingRect(false);
+          setMagneticSnapPoint(null);
+        }
+        return;
+      }
+
+      // Mode: Freeform Polygon
       // Close polygon if clicking near first point
       if (drawPoints.length >= 3) {
         const first = drawPoints[0];
@@ -885,6 +1101,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           }
           setDrawPoints([]);
           setDrawCursor(null);
+          setMagneticSnapPoint(null);
           return;
         }
       }
@@ -917,9 +1134,15 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     const world = screenToWorld(e.clientX, e.clientY);
 
     if (toolMode === 'draw-room') {
-      const cx = snapToGrid ? Math.round(world.x / step) * step : Math.round(world.x * 10) / 10;
-      const cy = snapToGrid ? Math.round(world.y / step) * step : Math.round(world.y * 10) / 10;
-      setDrawCursor({ x: cx, y: cy });
+      const rawX = snapToGrid ? Math.round(world.x / step) * step : Math.round(world.x * 10) / 10;
+      const rawY = snapToGrid ? Math.round(world.y / step) * step : Math.round(world.y * 10) / 10;
+      const { pt: snapped, isSnapped } = getSnappedPoint({ x: rawX, y: rawY });
+      setDrawCursor(snapped);
+      setMagneticSnapPoint(isSnapped ? snapped : null);
+
+      if (drawShapeMode === 'RECTANGLE' && rectStartPoint) {
+        setRectCurrentPoint(snapped);
+      }
     } else if (toolMode === 'calibrate') {
       const cx = snapToGrid ? Math.round(world.x / step) * step : Math.round(world.x * 10) / 10;
       const cy = snapToGrid ? Math.round(world.y / step) * step : Math.round(world.y * 10) / 10;
@@ -1072,21 +1295,40 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     setDragMode(moveVertexAction);
   };
 
+  // Room Drag (Translate Whole Room)
+  const handleRoomMouseDown = (e: React.MouseEvent, roomId: string) => {
+    if (e.button !== 0 || isPreviewMonitoring) return;
+    if (toolMode !== 'edit-room' && toolMode !== 'select') return;
+    e.stopPropagation();
+
+    if (onSelectRoom) onSelectRoom(roomId);
+    onSelectObject(null);
+    if (onSelectDevice) onSelectDevice(null);
+
+    const targetRoom = rooms.find((r) => r.id === roomId);
+    if (!targetRoom || !targetRoom.polygonCoordinates || targetRoom.polygonCoordinates.length < 3) return;
+
+    const world = screenToWorld(e.clientX, e.clientY);
+    const moveRoomAction: DragMode = {
+      type: 'MOVE_ROOM',
+      roomId,
+      startWorldX: world.x,
+      startWorldY: world.y,
+      origVertices: targetRoom.polygonCoordinates.map((p) => ({ ...p })),
+    };
+    dragRef.current = moveRoomAction;
+    setDragMode(moveRoomAction);
+    setEditingVertices(targetRoom.polygonCoordinates);
+  };
+
   // Helper: Format points string for SVG polygon
   const formatPolygonPoints = (pts: PolygonPoint[]): string => {
     return pts.map((p) => `${p.x},${p.y}`).join(' ');
   };
 
-  // Helper: Centroid for room labels
+  // Helper: Visual Center for room labels (Pole of Inaccessibility - guaranteed inside polygon)
   const getPolygonCentroid = (pts: PolygonPoint[]): { x: number; y: number } => {
-    if (!pts || pts.length === 0) return { x: 0, y: 0 };
-    let sumX = 0;
-    let sumY = 0;
-    pts.forEach((p) => {
-      sumX += p.x;
-      sumY += p.y;
-    });
-    return { x: sumX / pts.length, y: sumY / pts.length };
+    return getPolygonVisualCenter(pts);
   };
 
   const objects = floorPlan.objects || [];
@@ -1386,7 +1628,11 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                       stroke={roomColor}
                       strokeWidth={isSelected ? 3 : 1.5}
                       strokeDasharray={isSelected ? '6 4' : undefined}
-                    />
+                      onMouseDown={(e) => handleRoomMouseDown(e, room.id)}
+                      className={!isPreviewMonitoring ? (toolMode === 'edit-room' || isSelected ? 'cursor-move' : 'cursor-pointer') : undefined}
+                    >
+                      <title>Tarik untuk menggeser ruangan • Klik titik sudut untuk mengubah bentuk dinding</title>
+                    </polygon>
 
                     {/* Room Label */}
                     <g transform={`translate(${centroid.x}, ${centroid.y})`} pointerEvents="none">
@@ -1813,6 +2059,115 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         {/* 6. Room Polygon Vertex Edit Handles */}
         {toolMode === 'edit-room' && editingVertices && selectedRoomId && (
           <g id="room-polygon-edit-handles">
+            {/* Interactive Wall Edge Split Lines & Midpoint (+) Buttons */}
+            {editingVertices.map((vertex, idx) => {
+              const nextVertex = editingVertices[(idx + 1) % editingVertices.length];
+              const midX = (vertex.x + nextVertex.x) / 2;
+              const midY = (vertex.y + nextVertex.y) / 2;
+
+              return (
+                <g key={`edge-split-group-${idx}`}>
+                  {/* Wide invisible hit line over the entire wall edge */}
+                  <line
+                    x1={vertex.x}
+                    y1={vertex.y}
+                    x2={nextVertex.x}
+                    y2={nextVertex.y}
+                    stroke="transparent"
+                    strokeWidth="18"
+                    className="cursor-crosshair"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      const world = screenToWorld(e.clientX, e.clientY);
+                      const dx = nextVertex.x - vertex.x;
+                      const dy = nextVertex.y - vertex.y;
+                      const lenSq = dx * dx + dy * dy;
+                      let t = lenSq > 0 ? ((world.x - vertex.x) * dx + (world.y - vertex.y) * dy) / lenSq : 0.5;
+                      t = Math.max(0.08, Math.min(0.92, t));
+                      const clickPoint = {
+                        x: Math.round((vertex.x + t * dx) * 10) / 10,
+                        y: Math.round((vertex.y + t * dy) * 10) / 10,
+                      };
+                      handleSplitEdge(idx, clickPoint, e);
+                    }}
+                  >
+                    <title>Klik di sepanjang garis dinding untuk menambah titik sudut baru</title>
+                  </line>
+
+                  {/* Midpoint (+) Button Badge */}
+                  <g
+                    className="cursor-pointer"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      handleSplitEdge(idx, { x: midX, y: midY }, e);
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                    }}
+                  >
+                    {/* Enlarged invisible hit circle so clicks are 100% reliable */}
+                    <circle
+                      cx={midX}
+                      cy={midY}
+                      r="16"
+                      fill="transparent"
+                    >
+                      <title>Klik tanda (+) atau garis dinding untuk menambah titik sudut baru</title>
+                    </circle>
+
+                    {/* Outer glow ring */}
+                    <circle
+                      cx={midX}
+                      cy={midY}
+                      r="9"
+                      fill="#8B5CF6"
+                      fillOpacity="0.22"
+                      stroke="#8B5CF6"
+                      strokeWidth="1"
+                      strokeDasharray="2 2"
+                      pointerEvents="none"
+                    />
+
+                    {/* Button Body (No CSS scale transforms!) */}
+                    <circle
+                      cx={midX}
+                      cy={midY}
+                      r="6.5"
+                      fill="#8B5CF6"
+                      stroke="#FFFFFF"
+                      strokeWidth="1.8"
+                      className="hover:fill-purple-600 transition-colors"
+                    />
+
+                    {/* White (+) Cross Lines */}
+                    <line
+                      x1={midX - 3}
+                      y1={midY}
+                      x2={midX + 3}
+                      y2={midY}
+                      stroke="#FFFFFF"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      pointerEvents="none"
+                    />
+                    <line
+                      x1={midX}
+                      y1={midY - 3}
+                      x2={midX}
+                      y2={midY + 3}
+                      stroke="#FFFFFF"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      pointerEvents="none"
+                    />
+                  </g>
+                </g>
+              );
+            })}
+
             {editingVertices.map((vertex, idx) => {
               const isBeingDragged =
                 dragMode.type === 'MOVE_VERTEX' &&
@@ -1868,54 +2223,143 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           </g>
         )}
 
-        {/* 7. Draw Room Polygon Preview Line & Reticle */}
+        {/* 7. Draw Room Polygon / Rectangle Preview */}
         {toolMode === 'draw-room' && (
           <g id="draw-room-preview">
-            {drawPoints.length > 0 && (
-              <polyline
-                points={formatPolygonPoints(drawPoints)}
-                fill="none"
-                stroke="#8B5CF6"
-                strokeWidth="2"
-                strokeDasharray="4 4"
-              />
-            )}
-            {drawPoints.length > 0 && drawCursor && (
+            {/* 7a. RECTANGLE DRAWING PREVIEW */}
+            {drawShapeMode === 'RECTANGLE' && rectStartPoint && rectCurrentPoint && (() => {
+              const minX = Math.min(rectStartPoint.x, rectCurrentPoint.x);
+              const maxX = Math.max(rectStartPoint.x, rectCurrentPoint.x);
+              const minY = Math.min(rectStartPoint.y, rectCurrentPoint.y);
+              const maxY = Math.max(rectStartPoint.y, rectCurrentPoint.y);
+              const w = maxX - minX;
+              const h = maxY - minY;
+              const ppm = floorPlan.pixelsPerMeter || 50;
+              const wMeters = (w / ppm).toFixed(2);
+              const hMeters = (h / ppm).toFixed(2);
+              const areaM2 = ((w * h) / (ppm * ppm)).toFixed(1);
+
+              return (
+                <g id="draw-rectangle-preview" pointerEvents="none">
+                  {/* Rectangle fill & dashed border */}
+                  <rect
+                    x={minX}
+                    y={minY}
+                    width={w}
+                    height={h}
+                    fill="rgba(147, 51, 234, 0.22)"
+                    stroke="#9333EA"
+                    strokeWidth="2"
+                    strokeDasharray="5 3"
+                    rx="3"
+                  />
+
+                  {/* 4 Corner Anchors */}
+                  <circle cx={minX} cy={minY} r="5" fill="#9333EA" stroke="#FFFFFF" strokeWidth="2" />
+                  <circle cx={maxX} cy={minY} r="5" fill="#9333EA" stroke="#FFFFFF" strokeWidth="2" />
+                  <circle cx={maxX} cy={maxY} r="5" fill="#9333EA" stroke="#FFFFFF" strokeWidth="2" />
+                  <circle cx={minX} cy={maxY} r="5" fill="#9333EA" stroke="#FFFFFF" strokeWidth="2" />
+
+                  {/* Width dimension badge (top edge) */}
+                  {w > 30 && (
+                    <g transform={`translate(${minX + w / 2}, ${minY - 10})`}>
+                      <rect x="-35" y="-12" width="70" height="18" rx="6" fill="rgba(15, 23, 42, 0.9)" stroke="#9333EA" strokeWidth="1" />
+                      <text x="0" y="1" textAnchor="middle" fill="#E2E8F0" fontSize="10" fontWeight="bold" fontFamily="monospace">
+                        P: {wMeters}m
+                      </text>
+                    </g>
+                  )}
+
+                  {/* Height dimension badge (right edge) */}
+                  {h > 30 && (
+                    <g transform={`translate(${maxX + 12}, ${minY + h / 2})`}>
+                      <rect x="-3" y="-10" width="70" height="18" rx="6" fill="rgba(15, 23, 42, 0.9)" stroke="#9333EA" strokeWidth="1" />
+                      <text x="32" y="3" textAnchor="middle" fill="#E2E8F0" fontSize="10" fontWeight="bold" fontFamily="monospace">
+                        L: {hMeters}m
+                      </text>
+                    </g>
+                  )}
+
+                  {/* Center Area Badge */}
+                  {w > 60 && h > 40 && (
+                    <g transform={`translate(${minX + w / 2}, ${minY + h / 2})`}>
+                      <rect x="-42" y="-13" width="84" height="24" rx="8" fill="rgba(88, 28, 135, 0.92)" stroke="#A855F7" strokeWidth="1.5" />
+                      <text x="0" y="3" textAnchor="middle" fill="#34D399" fontSize="11" fontWeight="black" fontFamily="monospace">
+                        ~{areaM2} m²
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })()}
+
+            {/* 7b. FREEFORM POLYGON PREVIEW */}
+            {drawShapeMode === 'POLYGON' && (
               <>
-                <line
-                  x1={drawPoints[drawPoints.length - 1].x}
-                  y1={drawPoints[drawPoints.length - 1].y}
-                  x2={drawCursor.x}
-                  y2={drawCursor.y}
-                  stroke="#8B5CF6"
-                  strokeWidth="1.5"
-                  strokeDasharray="2 2"
-                />
-                {drawPoints.length >= 2 && (
-                  <line
-                    x1={drawCursor.x}
-                    y1={drawCursor.y}
-                    x2={drawPoints[0].x}
-                    y2={drawPoints[0].y}
-                    stroke="rgba(16, 185, 129, 0.45)"
-                    strokeWidth="1.2"
-                    strokeDasharray="3 3"
+                {drawPoints.length > 0 && (
+                  <polyline
+                    points={formatPolygonPoints(drawPoints)}
+                    fill="none"
+                    stroke="#8B5CF6"
+                    strokeWidth="2"
+                    strokeDasharray="4 4"
                   />
                 )}
+                {drawPoints.length > 0 && drawCursor && (
+                  <>
+                    <line
+                      x1={drawPoints[drawPoints.length - 1].x}
+                      y1={drawPoints[drawPoints.length - 1].y}
+                      x2={drawCursor.x}
+                      y2={drawCursor.y}
+                      stroke="#8B5CF6"
+                      strokeWidth="1.5"
+                      strokeDasharray="2 2"
+                    />
+                    {drawPoints.length >= 2 && (
+                      <line
+                        x1={drawCursor.x}
+                        y1={drawCursor.y}
+                        x2={drawPoints[0].x}
+                        y2={drawPoints[0].y}
+                        stroke="rgba(16, 185, 129, 0.45)"
+                        strokeWidth="1.2"
+                        strokeDasharray="3 3"
+                      />
+                    )}
+                  </>
+                )}
+                {/* Draw Room Placed Points */}
+                {drawPoints.map((pt, idx) => (
+                  <circle
+                    key={`draw-pt-${idx}`}
+                    cx={pt.x}
+                    cy={pt.y}
+                    r={idx === 0 ? '7' : '4'}
+                    fill={idx === 0 ? '#10B981' : '#8B5CF6'}
+                    stroke="#FFFFFF"
+                    strokeWidth="2"
+                  />
+                ))}
               </>
             )}
-            {/* Draw Room Placed Points */}
-            {drawPoints.map((pt, idx) => (
-              <circle
-                key={`draw-pt-${idx}`}
-                cx={pt.x}
-                cy={pt.y}
-                r={idx === 0 ? '7' : '4'}
-                fill={idx === 0 ? '#10B981' : '#8B5CF6'}
-                stroke="#FFFFFF"
-                strokeWidth="2"
-              />
-            ))}
+
+            {/* Magnetic Snap Ring Indicator */}
+            {magneticSnapPoint && (
+              <g pointerEvents="none">
+                <circle
+                  cx={magneticSnapPoint.x}
+                  cy={magneticSnapPoint.y}
+                  r="11"
+                  fill="none"
+                  stroke="#F59E0B"
+                  strokeWidth="2"
+                  strokeDasharray="3 2"
+                />
+                <circle cx={magneticSnapPoint.x} cy={magneticSnapPoint.y} r="3" fill="#F59E0B" />
+              </g>
+            )}
+
             {/* Real-time Sub-pixel Precision Reticle at Cursor (+) */}
             {drawCursor && (
               <g pointerEvents="none" opacity="0.9">
@@ -1924,7 +2368,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                   y1={drawCursor.y}
                   x2={drawCursor.x + 12}
                   y2={drawCursor.y}
-                  stroke="#8B5CF6"
+                  stroke={magneticSnapPoint ? '#F59E0B' : '#8B5CF6'}
                   strokeWidth="1.5"
                 />
                 <line
@@ -1932,7 +2376,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                   y1={drawCursor.y - 12}
                   x2={drawCursor.x}
                   y2={drawCursor.y + 12}
-                  stroke="#8B5CF6"
+                  stroke={magneticSnapPoint ? '#F59E0B' : '#8B5CF6'}
                   strokeWidth="1.5"
                 />
                 <circle
@@ -1940,7 +2384,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                   cy={drawCursor.y}
                   r="3.5"
                   fill="none"
-                  stroke="#8B5CF6"
+                  stroke={magneticSnapPoint ? '#F59E0B' : '#8B5CF6'}
                   strokeWidth="1.5"
                 />
               </g>
@@ -2117,26 +2561,92 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       )}
 
       {toolMode === 'draw-room' && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none animate-in fade-in slide-in-from-top duration-300">
-          <div className="flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-purple-700 text-white shadow-xl shadow-purple-950/40 border border-purple-400/30">
-            <PenTool className="w-4 h-4 text-purple-200" />
-            <span className="text-xs font-bold font-mono">
-              {drawPoints.length === 0
-                ? 'KLIK TITIK-TITIK SUDUT RUANGAN PADA DENAH'
-                : `TITIK TERPILIH: ${drawPoints.length}. KLIK TITIK AWAL HIJAU UNTUK MENUTUP POLIGON.`}
-            </span>
-            {drawPoints.length >= 3 && floorPlan.pixelsPerMeter && (
-              <span className="text-xs bg-purple-900/90 px-2 py-0.5 rounded-md font-bold text-emerald-300 border border-emerald-500/30">
-                ~{(computeShoelaceArea(drawPoints) / (floorPlan.pixelsPerMeter * floorPlan.pixelsPerMeter)).toFixed(1)} m²
-              </span>
-            )}
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 animate-in fade-in slide-in-from-top duration-300">
+          <div className="flex items-center gap-3 px-3.5 py-2 rounded-2xl bg-slate-900/95 backdrop-blur-md text-white shadow-2xl shadow-purple-950/60 border border-purple-500/40">
+            {/* Mode Switcher Pills */}
+            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 pointer-events-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  setDrawShapeMode('RECTANGLE');
+                  setDrawPoints([]);
+                  setRectStartPoint(null);
+                  setRectCurrentPoint(null);
+                  setIsDraggingRect(false);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  drawShapeMode === 'RECTANGLE'
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-600/40'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Tarik kotak persegi diagonal untuk membuat ruangan 4 sudut dengan cepat"
+              >
+                <Square className="w-3.5 h-3.5" />
+                <span>Kotak (Persegi)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDrawShapeMode('POLYGON');
+                  setRectStartPoint(null);
+                  setRectCurrentPoint(null);
+                  setIsDraggingRect(false);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  drawShapeMode === 'POLYGON'
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-600/40'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Klik titik demi titik untuk menggambar ruangan bersegi banyak / L-shape"
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                <span>Poligon Bebas</span>
+              </button>
+            </div>
+
+            {/* Instruction Tip & Real-time Metrics */}
+            <div className="text-xs font-mono font-bold flex items-center gap-2 select-none">
+              {drawShapeMode === 'RECTANGLE' ? (
+                <span className="text-purple-300">
+                  {rectStartPoint
+                    ? 'LEPAS ATAU KLIK SUDUT KEDUA UNTUK SELESAI'
+                    : 'TARIK DIAGONAL / KLIK 2 SUDUT PADA DENAH'}
+                </span>
+              ) : (
+                <span className="text-purple-300">
+                  {drawPoints.length === 0
+                    ? 'KLIK TITIK-TITIK SUDUT RUANGAN'
+                    : `TITIK TERPILIH: ${drawPoints.length}. KLIK TITIK AWAL HIJAU UNTUK MENUTUP.`}
+                </span>
+              )}
+
+              {/* Rectangle live area indicator */}
+              {drawShapeMode === 'RECTANGLE' && rectStartPoint && rectCurrentPoint && floorPlan.pixelsPerMeter && (
+                <span className="text-xs bg-purple-950 px-2 py-0.5 rounded-md font-bold text-emerald-300 border border-emerald-500/30">
+                  ~{(
+                    (Math.abs(rectCurrentPoint.x - rectStartPoint.x) *
+                      Math.abs(rectCurrentPoint.y - rectStartPoint.y)) /
+                    (floorPlan.pixelsPerMeter * floorPlan.pixelsPerMeter)
+                  ).toFixed(1)}{' '}
+                  m²
+                </span>
+              )}
+
+              {/* Freeform polygon live area indicator */}
+              {drawShapeMode === 'POLYGON' && drawPoints.length >= 3 && floorPlan.pixelsPerMeter && (
+                <span className="text-xs bg-purple-950 px-2 py-0.5 rounded-md font-bold text-emerald-300 border border-emerald-500/30">
+                  ~{(computeShoelaceArea(drawPoints) / (floorPlan.pixelsPerMeter * floorPlan.pixelsPerMeter)).toFixed(1)} m²
+                </span>
+              )}
+            </div>
+
             {onExitToolMode && (
               <button
                 type="button"
-                onClick={onExitToolMode}
-                className="pointer-events-auto ml-2 px-2.5 py-1 rounded-lg bg-black/25 hover:bg-black/40 text-[11px] font-bold"
+                onClick={handleCancelDrawRoom}
+                className="pointer-events-auto ml-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-bold border border-slate-700 transition-colors cursor-pointer"
               >
-                Selesai / Batal
+                Batal
               </button>
             )}
           </div>

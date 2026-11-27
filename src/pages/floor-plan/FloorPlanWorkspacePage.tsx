@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import {
   Map,
@@ -91,6 +91,8 @@ import { AutoRoomReferenceModal } from '../../components/floor-plan/AutoRoomRefe
 import { GeneratedRoomReference } from '../../utils/room-reference-generator';
 import { CalibrationModal } from '../../components/floor-plan/CalibrationModal';
 import { AutomationListPanel } from '../../components/automation/AutomationListPanel';
+import { useAuthenticatedBlobUrl } from '../../hooks/useAuthenticatedBlobUrl';
+import { ProceduralDollhouseViewer } from '../../components/viewer/ProceduralDollhouseViewer';
 
 export const FloorPlanWorkspacePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -109,6 +111,29 @@ export const FloorPlanWorkspacePage: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Authenticated Background Blueprint URL for Canvas & Dynamic Room Scanner
+  const rawBackgroundImageUrl = useMemo(() => {
+    return floorPlan?.imagePath
+      ? floorPlanApi.getBackgroundImageUrl(floorPlan.id, floorPlan.updatedAt || '1')
+      : null;
+  }, [floorPlan?.id, floorPlan?.imagePath, floorPlan?.updatedAt]);
+  const { blobUrl: backgroundImageUrl } = useAuthenticatedBlobUrl(rawBackgroundImageUrl);
+
+  // Stable Canvas Bounds for Auto Room Reference Modal
+  const stableCanvasBounds = useMemo(() => ({
+    width: floorPlan?.viewBoxWidth || floorPlan?.imageWidth || 1200,
+    height: floorPlan?.viewBoxHeight || floorPlan?.imageHeight || 900,
+    x: floorPlan?.viewBoxX || 0,
+    y: floorPlan?.viewBoxY || 0,
+  }), [
+    floorPlan?.viewBoxWidth,
+    floorPlan?.imageWidth,
+    floorPlan?.viewBoxHeight,
+    floorPlan?.imageHeight,
+    floorPlan?.viewBoxX,
+    floorPlan?.viewBoxY,
+  ]);
+
   // IoT Devices State (Product Direction Adjustment)
   const [devices, setDevices] = useState<IoTDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
@@ -118,6 +143,7 @@ export const FloorPlanWorkspacePage: React.FC = () => {
   // Publish & Preview Monitoring States
   const [publishStatus, setPublishStatus] = useState<string>('DRAFT');
   const [isPreviewMonitoring, setIsPreviewMonitoring] = useState<boolean>(false);
+  const [is3dMode, setIs3dMode] = useState<boolean>(false);
   const [isPublishModalOpen, setIsPublishModalOpen] = useState<boolean>(false);
   const [isAutomationPanelOpen, setIsAutomationPanelOpen] = useState<boolean>(false);
   const [lastTelemetryTime, setLastTelemetryTime] = useState<Date | null>(null);
@@ -1083,6 +1109,38 @@ export const FloorPlanWorkspacePage: React.FC = () => {
     }
   };
 
+  const handleDuplicateRoom = async (roomId: string) => {
+    if (!activeFloor) return;
+    const target = rooms.find((r) => r.id === roomId);
+    if (!target || !target.polygonCoordinates || target.polygonCoordinates.length < 3) return;
+
+    setSaveStatus('SAVING');
+    try {
+      const clonedCoordinates = target.polygonCoordinates.map((p) => ({
+        x: Math.round(p.x + 35),
+        y: Math.round(p.y + 35),
+      }));
+
+      const created = await roomApi.createRoom(activeFloor.id, {
+        name: `${target.name} (Salinan)`,
+        type: target.type,
+        color: target.color || undefined,
+        ceilingHeight: target.ceilingHeight ?? undefined,
+        polygonCoordinates: clonedCoordinates,
+      });
+
+      setRooms((prev) => [...prev, created]);
+      setSelectedRoomId(created.id);
+      setToolMode('edit-room');
+      setSaveStatus('SAVED');
+      if (floorPlan) refreshSpatialDetections(floorPlan.id);
+    } catch (err: any) {
+      setSaveStatus('ERROR');
+      setLastErrorMessage(err?.message || 'Gagal menduplikasi ruangan');
+      alert(err?.message || 'Gagal menduplikasi ruangan.');
+    }
+  };
+
   const handleToggleRoomVisibility = (roomId: string) => {
     setHiddenRoomIds((prev) => {
       const next = new Set(prev);
@@ -1101,7 +1159,24 @@ export const FloorPlanWorkspacePage: React.FC = () => {
   ) => {
     setSaveStatus('SAVING');
     try {
-      const updated = await roomApi.updateRoomPolygon(roomId, points);
+      // Clean and sanitize points before sending
+      let cleanPoints = points
+        .filter((p) => p && typeof p.x === 'number' && typeof p.y === 'number' && Number.isFinite(p.x) && Number.isFinite(p.y))
+        .map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
+
+      if (
+        cleanPoints.length > 3 &&
+        cleanPoints[0].x === cleanPoints[cleanPoints.length - 1].x &&
+        cleanPoints[0].y === cleanPoints[cleanPoints.length - 1].y
+      ) {
+        cleanPoints.pop();
+      }
+
+      if (cleanPoints.length < 3) {
+        throw new Error('Poligon ruangan memerlukan minimal 3 titik sudut.');
+      }
+
+      const updated = await roomApi.updateRoomPolygon(roomId, cleanPoints);
       setRooms((prev) => prev.map((r) => (r.id === roomId ? updated.room : r)));
       setSaveStatus('SAVED');
       setLastErrorMessage(null);
@@ -1110,6 +1185,7 @@ export const FloorPlanWorkspacePage: React.FC = () => {
       setSaveStatus('ERROR');
       setLastErrorMessage(err?.message || 'Gagal menyimpan bentuk poligon ruangan');
       console.error('Failed to update room polygon:', err);
+      setRooms((prev) => [...prev]);
       alert(`Gagal menyimpan poligon: ${err?.message || 'Pastikan garis poligon tidak bersilangan dan minimal memiliki 3 titik.'}`);
     }
   };
@@ -1134,12 +1210,28 @@ export const FloorPlanWorkspacePage: React.FC = () => {
 
       const createdRooms: Room[] = [];
       for (const r of roomsToCreate) {
+        // Sanitize polygon points before sending
+        let cleanPolygon = r.polygonCoordinates;
+        if (cleanPolygon && Array.isArray(cleanPolygon)) {
+          cleanPolygon = cleanPolygon
+            .filter((p) => p && typeof p.x === 'number' && typeof p.y === 'number' && Number.isFinite(p.x) && Number.isFinite(p.y))
+            .map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
+          // Ensure first and last point are not identical
+          if (
+            cleanPolygon.length > 3 &&
+            cleanPolygon[0].x === cleanPolygon[cleanPolygon.length - 1].x &&
+            cleanPolygon[0].y === cleanPolygon[cleanPolygon.length - 1].y
+          ) {
+            cleanPolygon.pop();
+          }
+        }
+
         const created = await roomApi.createRoom(activeFloor.id, {
           name: r.name,
           type: r.type,
           color: r.color,
-          polygonCoordinates: r.polygonCoordinates,
-          ceilingHeight: r.ceilingHeight,
+          polygonCoordinates: cleanPolygon && cleanPolygon.length >= 3 ? cleanPolygon : undefined,
+          ceilingHeight: r.ceilingHeight || 3.0,
         });
         createdRooms.push(created);
       }
@@ -1267,9 +1359,9 @@ export const FloorPlanWorkspacePage: React.FC = () => {
   const selectedRoom = rooms.find((r) => r.id === selectedRoomId) || null;
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || null;
 
-  // Dynamic Layout: Hide empty sidebars during monitoring or when nothing is selected
-  const hasInspectorTarget = !isPreviewMonitoring && !!(selectedDevice || selectedRoom || selectedObject);
-  const canvasColSpan = isPreviewMonitoring
+  // Dynamic Layout: Hide empty sidebars during monitoring or 3D or when nothing is selected
+  const hasInspectorTarget = !isPreviewMonitoring && !is3dMode && !!(selectedDevice || selectedRoom || selectedObject);
+  const canvasColSpan = (isPreviewMonitoring || is3dMode)
     ? 'lg:col-span-12'
     : hasInspectorTarget
     ? 'lg:col-span-6'
@@ -1788,19 +1880,20 @@ export const FloorPlanWorkspacePage: React.FC = () => {
               </div>
             </div>
 
-            {/* Mode Switcher: Desain vs Preview Monitoring */}
+            {/* Mode Switcher: Desain vs Preview Monitoring vs 3D Twin */}
             <div className="flex items-center p-0.5 rounded-xl bg-slate-200/70 border border-slate-300/60 text-xs font-bold shrink-0">
               <button
                 type="button"
                 onClick={() => {
+                  setIs3dMode(false);
                   if (isPreviewMonitoring) handleTogglePreviewMonitoring();
                 }}
                 className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg transition-all text-xs cursor-pointer ${
-                  !isPreviewMonitoring
+                  !isPreviewMonitoring && !is3dMode
                     ? 'bg-white text-[#4F6BFF] shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
-                title="Mode Desain / Konfigurasi"
+                title="Mode Desain / Konfigurasi 2D"
               >
                 <PenTool className="w-3.5 h-3.5 sm:hidden text-[#4F6BFF]" />
                 <span className="hidden sm:inline">Desain</span>
@@ -1808,17 +1901,34 @@ export const FloorPlanWorkspacePage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
+                  setIs3dMode(false);
                   if (!isPreviewMonitoring) handleTogglePreviewMonitoring();
                 }}
                 className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg transition-all text-xs cursor-pointer ${
-                  isPreviewMonitoring
+                  isPreviewMonitoring && !is3dMode
                     ? 'bg-[#4F6BFF] text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
-                title="Preview Monitoring Live"
+                title="Preview Monitoring Live 2D"
               >
                 <Eye className="w-3.5 h-3.5 sm:hidden" />
                 <span className="hidden sm:inline">Monitoring</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIs3dMode(true);
+                  if (isPreviewMonitoring) setIsPreviewMonitoring(false);
+                }}
+                className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg transition-all text-xs cursor-pointer ${
+                  is3dMode
+                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Tampilan 3D Procedural Dollhouse Digital Twin"
+              >
+                <Box className="w-3.5 h-3.5 sm:hidden" />
+                <span className="hidden sm:inline">3D Twin</span>
               </button>
             </div>
 
@@ -1880,9 +1990,24 @@ export const FloorPlanWorkspacePage: React.FC = () => {
             3. BOUNDLESS CANVAS VIEWPORT & FLOATING OVERLAYS
             ========================================================================= */}
         <main className="flex-1 w-full h-full relative overflow-hidden bg-[#EEF2F8]">
-          {/* SVG Floor Plan Canvas */}
+          {/* SVG Floor Plan Canvas or 3D Procedural Dollhouse */}
           {floorPlan ? (
-            <FloorPlanCanvas
+            is3dMode ? (
+              <ProceduralDollhouseViewer
+                floorPlan={floorPlan}
+                rooms={rooms}
+                devices={devices}
+                furniture={floorPlan.objects || []}
+                selectedDeviceId={selectedDeviceId}
+                selectedRoomId={selectedRoomId}
+                onSelectDevice={(d) => setSelectedDeviceId(d ? d.id : null)}
+                onOpenDeviceControl={(dev) => setControlModalDevice(dev)}
+                onUpdateDevice={handleUpdateDevice}
+                onSelectRoom={(id) => setSelectedRoomId(id)}
+                className="w-full h-full min-h-[calc(100vh-140px)]"
+              />
+            ) : (
+              <FloorPlanCanvas
               floorPlan={floorPlan}
               rooms={rooms}
               devices={devices}
@@ -1939,7 +2064,8 @@ export const FloorPlanWorkspacePage: React.FC = () => {
               categoryFilter={selectedCategoryTab}
               onClearCategoryFilter={() => setSelectedCategoryTab('Overview')}
             />
-          ) : (
+          )
+        ) : (
             <div className="flex-1 w-full h-full flex flex-col items-center justify-center text-slate-400 p-6 text-center">
               <AlertCircle className="w-10 h-10 text-slate-500 mb-2" />
               <p className="text-sm font-semibold text-slate-700">Denah tidak tersedia</p>
@@ -1950,7 +2076,7 @@ export const FloorPlanWorkspacePage: React.FC = () => {
           {/* =======================================================================
               CENTER FLOATING CAD TOOLS (Figma / Miro style hovering island)
               ======================================================================= */}
-          {!isPreviewMonitoring && (
+          {!isPreviewMonitoring && !is3dMode && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-white/95 backdrop-blur-xl p-1.5 rounded-2xl border border-slate-200/90 shadow-xl pointer-events-auto">
               <button
                 type="button"
@@ -2059,7 +2185,7 @@ export const FloorPlanWorkspacePage: React.FC = () => {
           {/* =======================================================================
               4. FLOATING LEFT PANEL: THE HERO DASHBOARD CARDS (Matching Reference!)
               ======================================================================= */}
-          {!isPreviewMonitoring && isLeftPanelOpen && (
+          {!isPreviewMonitoring && !is3dMode && isLeftPanelOpen && (
             <div className="absolute top-3 left-6 z-20 w-[360px] sm:w-[390px] flex flex-col gap-3 max-h-[calc(100vh-100px)] overflow-y-auto no-scrollbar pointer-events-auto animate-in fade-in slide-in-from-left duration-200">
               {/* Header Tab Switcher Pill */}
               <div className="flex items-center justify-between p-1 rounded-2xl bg-white/90 backdrop-blur-md shadow-xs border border-white/80 shrink-0">
@@ -2449,6 +2575,7 @@ export const FloorPlanWorkspacePage: React.FC = () => {
                   linkedObjects={floorPlan?.objects.filter((o) => o.roomId === selectedRoom.id) || []}
                   onUpdateRoom={(roomId, updates) => handleUpdateRoom(roomId, updates)}
                   onDeleteRoom={(roomId) => handleDeleteRoom(roomId)}
+                  onDuplicateRoom={(roomId) => handleDuplicateRoom(roomId)}
                   onEditPolygon={(roomId) => {
                     if (selectedRoom.polygonCoordinates && selectedRoom.polygonCoordinates.length >= 3) {
                       setToolMode('edit-room');
@@ -2570,7 +2697,7 @@ export const FloorPlanWorkspacePage: React.FC = () => {
               7. FLOATING BOTTOM-LEFT PILL: RE-OPEN DASHBOARD & QUICK SUMMARY
               ======================================================================= */}
           <div className="absolute bottom-6 left-6 z-10 flex items-center gap-2 pointer-events-auto">
-            {!isPreviewMonitoring && !isLeftPanelOpen && (
+            {!isPreviewMonitoring && !is3dMode && !isLeftPanelOpen && (
               <button
                 type="button"
                 onClick={() => setIsLeftPanelOpen(true)}
@@ -2616,14 +2743,10 @@ export const FloorPlanWorkspacePage: React.FC = () => {
       <AutoRoomReferenceModal
         isOpen={isAutoRoomRefOpen}
         onClose={() => setIsAutoRoomRefOpen(false)}
-        canvasBounds={{
-          width: floorPlan?.viewBoxWidth || floorPlan?.imageWidth || 1200,
-          height: floorPlan?.viewBoxHeight || floorPlan?.imageHeight || 900,
-          x: floorPlan?.viewBoxX || 0,
-          y: floorPlan?.viewBoxY || 0,
-        }}
+        canvasBounds={stableCanvasBounds}
         pixelsPerMeter={floorPlan?.pixelsPerMeter}
         currentRoomCount={rooms.length}
+        backgroundImageUrl={backgroundImageUrl}
         onApply={handleApplyAutoRoomReferences}
       />
 

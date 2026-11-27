@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   X,
   Ruler,
+  Copy,
 } from 'lucide-react';
 import { Room, RoomType, FloorPlanObject } from '../../types/floor-plan';
 import { ROOM_TYPE_LABELS } from './RoomExplorerPanel';
@@ -24,6 +25,7 @@ interface RoomInspectorPanelProps {
   onUpdateRoom: (roomId: string, updates: Partial<Room>) => void;
   onDeleteRoom: (roomId: string) => void;
   onEditPolygon: (roomId: string) => void;
+  onDuplicateRoom?: (roomId: string) => void;
   onSelectObject: (objectId: string) => void;
   isCalibrated: boolean;
   onClose?: () => void;
@@ -49,6 +51,7 @@ export const RoomInspectorPanel: React.FC<RoomInspectorPanelProps> = ({
   onUpdateRoom,
   onDeleteRoom,
   onEditPolygon,
+  onDuplicateRoom,
   onSelectObject,
   isCalibrated,
   onClose,
@@ -250,8 +253,8 @@ export const RoomInspectorPanel: React.FC<RoomInspectorPanelProps> = ({
           </div>
         </div>
 
-        {/* Polygon Edit / Draw Button */}
-        <div>
+        {/* Polygon Edit / Draw Button & Duplicate Room Button */}
+        <div className="space-y-2">
           <Button
             variant="secondary"
             size="sm"
@@ -262,6 +265,20 @@ export const RoomInspectorPanel: React.FC<RoomInspectorPanelProps> = ({
             <Edit3 className="w-3.5 h-3.5" />
             <span>{hasPolygon ? 'Edit Titik Sudut Poligon pada Denah' : 'Gambar Poligon untuk Ruangan Ini'}</span>
           </Button>
+
+          {onDuplicateRoom && hasPolygon && (
+            <Button
+              variant="outline"
+              size="sm"
+              pill
+              onClick={() => onDuplicateRoom(room.id)}
+              className="w-full text-xs gap-1.5 border-slate-200 text-slate-700 hover:bg-purple-50/70 hover:border-purple-300"
+              title="Salin bentuk dan ukuran ruangan ini ke ruangan baru"
+            >
+              <Copy className="w-3.5 h-3.5 text-purple-600" />
+              <span>Duplikat / Kloning Ruangan Ini</span>
+            </Button>
+          )}
         </div>
 
         {/* Linked Objects in Room */}

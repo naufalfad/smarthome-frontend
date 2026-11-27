@@ -79,6 +79,7 @@ export interface DashboardRoom {
   color: string;
   polygonCoordinates?: { x: number; y: number }[] | null;
   areaSquareMeters?: number | null;
+  ceilingHeight?: number | null;
   deviceCount: number;
   environmental: {
     temperature: number | null;
